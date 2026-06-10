@@ -1,7 +1,7 @@
 # Nightshift — Implementation Plan
 
 Status: 2026-06-10. Blueprint APPROVED (3-round Codex review). Step 0 done.
-**Resume point: Phase 1, task 1.1.** Specs that bind every task below:
+**Resume point: Phase 1, task 1.3.** Specs that bind every task below:
 `docs/BLUEPRINT.md` (§3.12 overrides), `docs/SPEC-STATE-MACHINES.md`,
 `docs/SPEC-SCHEMA.md`, `docs/THREAT-MODEL.md`, `REUSE.md`.
 
@@ -17,10 +17,10 @@ gate passes. ☐ open ☑ done
 ☐ **GATE: owner reads the 3 specs and says go** ← pending
 
 ## Phase 1 — Skeleton (control plane core)
-1.1 ☐ Bun project wiring: tsconfig, Drizzle, `bun:sqlite` with WAL +
+1.1 ☑ Bun project wiring: tsconfig, Drizzle, `bun:sqlite` with WAL +
     busy_timeout + writer queue (SPEC-SCHEMA "SQLite discipline")
     → verify: parallel-write stress test passes, no SQLITE_BUSY surfaced.
-1.2 ☐ Schema migration 0001 from SPEC-SCHEMA (all 13 tables + indexes +
+1.2 ☑ Schema migration 0001 from SPEC-SCHEMA (all 13 tables + indexes +
     partial unique `one_active_run_per_task`)
     → verify: migration applies clean; invariant tests for unique/FK rules.
 1.3 ☐ Global event log + broker: adapt `reference/warren/events.ts`

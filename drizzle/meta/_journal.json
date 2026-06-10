@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1781086919731,
+      "tag": "0001_majestic_marrow",
+      "breakpoints": true
+    }
+  ]
+}
