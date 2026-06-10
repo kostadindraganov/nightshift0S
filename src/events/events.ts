@@ -141,32 +141,41 @@ export class EventLog {
 	 * the persisted row once it is durably written.
 	 */
 	emitEvent(input: EmitEventInput): Promise<EventRow> {
-		return enqueueWrite(() => {
-			// The DB is the counter: max(seq)+1 inside the serialized write is
-			// gap-free under concurrency and survives restarts for free.
-			const next =
-				(this.handle.db
-					.select({ max: sql<number>`coalesce(max(${events.seq}), 0)` })
-					.from(events)
-					.get()?.max ?? 0) + 1;
-			const row = this.handle.db
-				.insert(events)
-				.values({
-					projectId: input.projectId ?? null,
-					runId: input.runId ?? null,
-					taskId: input.taskId ?? null,
-					seq: next,
-					kind: input.kind,
-					payloadJson: JSON.stringify(input.payload ?? null),
-					ts: new Date().toISOString(),
-				})
-				.returning()
-				.get();
-			// Write-through first, publish second; publishing inside the same
-			// (synchronous) link guarantees publish order == seq order.
-			for (const sub of this.subs) sub.push(row);
-			return row;
-		});
+		return enqueueWrite(() => this.emitInWriter(input));
+	}
+
+	/**
+	 * Synchronous emit for callers that are ALREADY inside a writer-queue link
+	 * (e.g. a guarded state-transition UPDATE that must persist its event row
+	 * in the SAME link — SPEC-STATE-MACHINES invariant 5). Calling `emitEvent`
+	 * from inside `enqueueWrite` would deadlock the chain; calling this from
+	 * OUTSIDE a link forfeits the serialization guarantee.
+	 */
+	emitInWriter(input: EmitEventInput): EventRow {
+		// The DB is the counter: max(seq)+1 inside the serialized write is
+		// gap-free under concurrency and survives restarts for free.
+		const next =
+			(this.handle.db
+				.select({ max: sql<number>`coalesce(max(${events.seq}), 0)` })
+				.from(events)
+				.get()?.max ?? 0) + 1;
+		const row = this.handle.db
+			.insert(events)
+			.values({
+				projectId: input.projectId ?? null,
+				runId: input.runId ?? null,
+				taskId: input.taskId ?? null,
+				seq: next,
+				kind: input.kind,
+				payloadJson: JSON.stringify(input.payload ?? null),
+				ts: new Date().toISOString(),
+			})
+			.returning()
+			.get();
+		// Write-through first, publish second; publishing inside the same
+		// (synchronous) link guarantees publish order == seq order.
+		for (const sub of this.subs) sub.push(row);
+		return row;
 	}
 
 	/** Test/diagnostic surface — number of currently-attached subscribers. */

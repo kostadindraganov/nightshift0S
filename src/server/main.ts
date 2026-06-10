@@ -11,6 +11,8 @@
 
 import { openDatabase } from "../db/client.ts";
 import { runMigrations } from "../db/migrate.ts";
+import { EventLog } from "../events/events.ts";
+import { ValidationError } from "../tasks/tasks.ts";
 import { authenticate } from "./auth.ts";
 import { jsonError, matchRoute, routes, type RouteContext } from "./routes.ts";
 
@@ -28,9 +30,14 @@ export function createServer(options: CreateServerOptions = {}): Bun.Server<unde
 	// Open + migrate before serving so /readyz is honest from the first request.
 	const handle = openDatabase(options.dbPath);
 	runMigrations(handle);
+	// One event log per server — the write-through emitter AND the SSE source.
+	const events = new EventLog(handle);
 
 	return Bun.serve({
 		port,
+		// Must exceed the SSE heartbeat interval (15s) or Bun would reset idle
+		// event-stream connections between heartbeats (default is 10s).
+		idleTimeout: 60,
 		async fetch(req) {
 			const url = new URL(req.url);
 			const match = matchRoute(routes, req.method, url.pathname);
@@ -44,10 +51,15 @@ export function createServer(options: CreateServerOptions = {}): Bun.Server<unde
 				const auth = authenticate(req);
 				if (!auth.ok) return jsonError(auth.status, auth.code, auth.message);
 			}
-			const ctx: RouteContext = { req, url, params: match.params, handle };
+			const ctx: RouteContext = { req, url, params: match.params, handle, events };
 			try {
 				return await match.route.handler(ctx);
 			} catch (err) {
+				if (err instanceof ValidationError) {
+					const code =
+						err.status === 404 ? "not_found" : err.status === 409 ? "conflict" : "invalid_request";
+					return jsonError(err.status, code, err.message);
+				}
 				return jsonError(500, "internal_error", err instanceof Error ? err.message : String(err));
 			}
 		},

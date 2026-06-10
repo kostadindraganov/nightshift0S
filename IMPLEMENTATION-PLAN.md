@@ -1,7 +1,7 @@
 # Nightshift — Implementation Plan
 
 Status: 2026-06-10. Blueprint APPROVED (3-round Codex review). Step 0 done.
-**Resume point: Phase 1, task 1.5.** Specs that bind every task below:
+**Resume point: Phase 1, task 1.6.** Specs that bind every task below:
 `docs/BLUEPRINT.md` (§3.12 overrides), `docs/SPEC-STATE-MACHINES.md`,
 `docs/SPEC-SCHEMA.md`, `docs/THREAT-MODEL.md`, `REUSE.md`.
 
@@ -30,7 +30,7 @@ gate passes. ☐ open ☑ done
 1.4 ☑ HTTP API skeleton (Bun.serve, route table, bearer auth w/
     constant-time compare, /healthz /readyz /version)
     → verify: openapi-ish route list generated; auth rejects bad tokens.
-1.5 ☐ Task CRUD + state machine enforcement (guarded SQL transitions from
+1.5 ☑ Task CRUD + state machine enforcement (guarded SQL transitions from
     SPEC-STATE-MACHINES §6) + dependency table with BFS cycle check
     (port from `ui-reference/features.ts`)
     → verify: illegal-transition test matrix (every from→to pair).
