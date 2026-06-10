@@ -1,0 +1,11 @@
+{
+  "name": "nightshift",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "workspaces": ["vendor/sandcastle"],
+  "scripts": {
+    "dev": "bun run src/server/main.ts",
+    "test": "bun test"
+  }
+}

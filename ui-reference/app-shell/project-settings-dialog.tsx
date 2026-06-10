@@ -1,0 +1,773 @@
+"use client";
+
+import * as React from "react";
+
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogCloseButton,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+/**
+ * Project-specific settings dialog (Feature #35).
+ *
+ * The `settings` table stores global rows with `project_id = NULL` and
+ * per-project overrides with a non-null `project_id`. This dialog lets the
+ * user override the local-model provider, the provider's base URL, and/or
+ * the model for a single project. Leaving a field blank falls back to the
+ * corresponding global value.
+ *
+ * The API call to PUT /api/projects/:id/settings accepts an empty string
+ * as a signal to clear that override, so "back to global default" is just
+ * "clear the field and save".
+ */
+
+type ProviderId = "lm_studio" | "ollama";
+
+const PROVIDER_LABELS: Record<ProviderId, string> = {
+  lm_studio: "LM Studio",
+  ollama: "Ollama",
+};
+
+const PROVIDER_INSTALL_URLS: Record<ProviderId, string> = {
+  lm_studio: "https://lmstudio.ai",
+  ollama: "https://ollama.com",
+};
+
+function isProvider(value: unknown): value is ProviderId {
+  return value === "lm_studio" || value === "ollama";
+}
+
+function urlKeyFor(provider: ProviderId): "lm_studio_url" | "ollama_url" {
+  return provider === "ollama" ? "ollama_url" : "lm_studio_url";
+}
+
+type ProjectSettingsResponse = {
+  overrides: {
+    provider: string | null;
+    lm_studio_url: string | null;
+    ollama_url: string | null;
+    model: string | null;
+    coder_prompt: string | null;
+    dev_server_port: string | null;
+    max_concurrent_agents: string | null;
+    playwright_enabled: string | null;
+    playwright_headed: string | null;
+  };
+  effective: {
+    provider: string;
+    lm_studio_url: string;
+    ollama_url: string;
+    model: string;
+    coder_prompt: string;
+    dev_server_port: string;
+    max_concurrent_agents: string;
+    playwright_enabled: string;
+    playwright_headed: string;
+  };
+  defaults: {
+    provider: string;
+    lm_studio_url: string;
+    ollama_url: string;
+    model: string;
+    coder_prompt: string;
+    dev_server_port: string;
+    max_concurrent_agents: string;
+    playwright_enabled: string;
+    playwright_headed: string;
+  };
+};
+
+function describePlaywrightEnabled(raw: string): string {
+  return raw === "true" ? "Enabled" : "Disabled";
+}
+
+function describePlaywrightHeaded(raw: string): string {
+  return raw === "true" ? "Headed" : "Headless";
+}
+
+type ModelsProbe =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ok"; models: string[] }
+  | { status: "error"; message: string };
+
+export type ProjectSettingsDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  projectId: number;
+  projectName: string;
+};
+
+export function ProjectSettingsDialog({
+  open,
+  onOpenChange,
+  projectId,
+  projectName,
+}: ProjectSettingsDialogProps) {
+  const [loading, setLoading] = React.useState(true);
+  const [data, setData] = React.useState<ProjectSettingsResponse | null>(null);
+  // Overrides edited by the user. Empty string means "clear the override".
+  const [provider, setProvider] = React.useState<string>("");
+  const [lmStudioUrl, setLmStudioUrl] = React.useState("");
+  const [ollamaUrl, setOllamaUrl] = React.useState("");
+  const [model, setModel] = React.useState("");
+  const [coderPrompt, setCoderPrompt] = React.useState("");
+  const [devServerPort, setDevServerPort] = React.useState("");
+  const [maxConcurrentAgents, setMaxConcurrentAgents] = React.useState("");
+  const [playwrightEnabled, setPlaywrightEnabled] = React.useState("");
+  const [playwrightHeaded, setPlaywrightHeaded] = React.useState("");
+  const [submitting, setSubmitting] = React.useState(false);
+  const [saved, setSaved] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [probe, setProbe] = React.useState<ModelsProbe>({ status: "idle" });
+
+  // Fetch current overrides + defaults whenever the dialog opens.
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      setSaved(false);
+      try {
+        const res = await fetch(`/api/projects/${projectId}/settings`, {
+          cache: "no-store",
+        });
+        const payload = (await res.json()) as Partial<ProjectSettingsResponse> & {
+          error?: string;
+        };
+        if (!res.ok) {
+          throw new Error(payload.error || `Load failed (${res.status})`);
+        }
+        if (cancelled) return;
+        const complete = payload as ProjectSettingsResponse;
+        setData(complete);
+        setProvider(complete.overrides.provider ?? "");
+        setLmStudioUrl(complete.overrides.lm_studio_url ?? "");
+        setOllamaUrl(complete.overrides.ollama_url ?? "");
+        setModel(complete.overrides.model ?? "");
+        setCoderPrompt(complete.overrides.coder_prompt ?? "");
+        setDevServerPort(complete.overrides.dev_server_port ?? "");
+        setMaxConcurrentAgents(complete.overrides.max_concurrent_agents ?? "");
+        setPlaywrightEnabled(complete.overrides.playwright_enabled ?? "");
+        setPlaywrightHeaded(complete.overrides.playwright_headed ?? "");
+      } catch (err) {
+        if (cancelled) return;
+        setError(
+          err instanceof Error ? err.message : "Failed to load project settings",
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectId]);
+
+  // The provider whose models we should probe = the override if set, else
+  // the currently-effective provider (which already reflects the global).
+  const effectiveProviderRaw =
+    provider || data?.effective.provider || "lm_studio";
+  const activeProvider: ProviderId = isProvider(effectiveProviderRaw)
+    ? effectiveProviderRaw
+    : "lm_studio";
+
+  const effectiveUrl = (() => {
+    if (activeProvider === "ollama") {
+      return ollamaUrl || data?.effective.ollama_url || "";
+    }
+    return lmStudioUrl || data?.effective.lm_studio_url || "";
+  })();
+
+  const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => {
+    if (!open || !data || !effectiveUrl) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setProbe({ status: "loading" });
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/providers/${activeProvider}/models?url=${encodeURIComponent(
+            effectiveUrl,
+          )}`,
+          { cache: "no-store" },
+        );
+        const payload = (await res.json()) as {
+          ok?: boolean;
+          models?: string[];
+          error?: string;
+        };
+        if (!res.ok || !payload.ok) {
+          setProbe({
+            status: "error",
+            message: payload.error ?? `Probe failed (HTTP ${res.status})`,
+          });
+          return;
+        }
+        setProbe({ status: "ok", models: payload.models ?? [] });
+      } catch (err) {
+        setProbe({
+          status: "error",
+          message: err instanceof Error ? err.message : "Probe failed",
+        });
+      }
+    }, 400);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [open, data, activeProvider, effectiveUrl]);
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // Empty strings clear the override on the server side, falling
+          // back to the global default. Anything else sets it.
+          provider,
+          lm_studio_url: lmStudioUrl,
+          ollama_url: ollamaUrl,
+          model,
+          coder_prompt: coderPrompt,
+          dev_server_port: devServerPort,
+          max_concurrent_agents: maxConcurrentAgents,
+          playwright_enabled: playwrightEnabled,
+          playwright_headed: playwrightHeaded,
+        }),
+      });
+      const payload = (await res.json()) as Partial<ProjectSettingsResponse> & {
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(payload.error || `Save failed (${res.status})`);
+      }
+      if (payload.overrides && payload.effective) {
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                overrides: payload.overrides!,
+                effective: payload.effective!,
+              }
+            : prev,
+        );
+      }
+      setSaved(true);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to save project settings",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const urlKey = urlKeyFor(activeProvider);
+  const urlValue = activeProvider === "ollama" ? ollamaUrl : lmStudioUrl;
+  const setUrlValue =
+    activeProvider === "ollama" ? setOllamaUrl : setLmStudioUrl;
+  const urlDefault =
+    activeProvider === "ollama"
+      ? data?.defaults.ollama_url ?? ""
+      : data?.defaults.lm_studio_url ?? "";
+  const urlOverridden =
+    activeProvider === "ollama"
+      ? !!data?.overrides.ollama_url
+      : !!data?.overrides.lm_studio_url;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onOpenChange(false);
+      }}
+      labelledBy="project-settings-title"
+    >
+      <DialogCloseButton onClick={() => onOpenChange(false)} />
+      <DialogHeader>
+        <DialogTitle id="project-settings-title">Project settings</DialogTitle>
+        <DialogDescription>
+          Override the local-model provider, URL, or model for{" "}
+          <span className="font-medium text-foreground">{projectName}</span>.
+          Leave a field blank to use the global default.
+        </DialogDescription>
+      </DialogHeader>
+      <form
+        onSubmit={handleSubmit}
+        data-testid="project-settings-form"
+        // `contents` makes the form layout-transparent so DialogBody and
+        // DialogFooter become direct flex children of the dialog panel —
+        // this is what lets the body's overflow-y-auto actually engage
+        // and keeps the footer pinned at the bottom of the viewport-cap.
+        className="contents"
+      >
+        <DialogBody className="space-y-4">
+          {loading && (
+            <p
+              data-testid="project-settings-loading"
+              className="text-sm text-muted-foreground"
+            >
+              Loading current settings…
+            </p>
+          )}
+          {!loading && data && (
+            <>
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="project-provider"
+                  className="text-sm font-medium text-foreground"
+                >
+                  Provider
+                </label>
+                <select
+                  id="project-provider"
+                  name="project-provider"
+                  data-testid="project-settings-provider-select"
+                  value={provider}
+                  onChange={(e) => setProvider(e.target.value)}
+                  disabled={submitting}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <option value="">
+                    Use global default ({PROVIDER_LABELS[
+                      isProvider(data.defaults.provider)
+                        ? data.defaults.provider
+                        : "lm_studio"
+                    ]})
+                  </option>
+                  <option value="lm_studio">LM Studio</option>
+                  <option value="ollama">Ollama</option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  {data.overrides.provider
+                    ? "Project override is set. Choose 'Use global default' to clear."
+                    : "Using the global default. Pick a provider to override."}
+                </p>
+              </div>
+              <Field
+                label={`${PROVIDER_LABELS[activeProvider]} URL`}
+                id={`project-${urlKey}`}
+                value={urlValue}
+                onChange={setUrlValue}
+                placeholder={urlDefault}
+                disabled={submitting}
+                description={
+                  urlOverridden
+                    ? "Project override is set. Clear to fall back to the global default."
+                    : "Using the global default. Type a value to override."
+                }
+              />
+              <ProviderProbeStatus
+                provider={activeProvider}
+                probe={probe}
+              />
+              <ModelField
+                probe={probe}
+                provider={activeProvider}
+                model={model}
+                onChange={setModel}
+                placeholder={data.defaults.model}
+                disabled={submitting}
+                overridden={!!data.overrides.model}
+              />
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="project-coder-prompt"
+                  className="text-sm font-medium text-foreground"
+                >
+                  Additional coding instructions
+                </label>
+                <textarea
+                  id="project-coder-prompt"
+                  name="project-coder-prompt"
+                  data-testid="project-settings-coder-prompt"
+                  rows={6}
+                  value={coderPrompt}
+                  onChange={(e) => setCoderPrompt(e.target.value)}
+                  placeholder="e.g. Use Tailwind for styling. Always run npm run build after changes. Prefer server components over client components."
+                  disabled={submitting}
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Appended to the base coding prompt for every agent session.
+                  Use this for frameworks, conventions, or any project-specific
+                  rules. For the dev server port, use the dedicated Dev server
+                  port field below — the agent reads that field directly.
+                </p>
+              </div>
+              <Field
+                label="Dev server port"
+                id="project-dev-server-port"
+                value={devServerPort}
+                onChange={setDevServerPort}
+                placeholder={data.defaults.dev_server_port}
+                disabled={submitting}
+                description={
+                  data.overrides.dev_server_port
+                    ? "Project override is set. The coding agent starts the dev server on this port, and Playwright screenshots hit the same port."
+                    : `Using the global default (${data.defaults.dev_server_port}). The coding agent starts the dev server on this port, and Playwright screenshots hit the same port.`
+                }
+              />
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="project-max-concurrent-agents"
+                  className="text-sm font-medium text-foreground"
+                >
+                  Max concurrent agents
+                </label>
+                <select
+                  id="project-max-concurrent-agents"
+                  name="project-max-concurrent-agents"
+                  data-testid="project-settings-max-concurrent-agents-select"
+                  value={maxConcurrentAgents}
+                  onChange={(e) => setMaxConcurrentAgents(e.target.value)}
+                  disabled={submitting}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <option value="">
+                    Use global default ({data.defaults.max_concurrent_agents})
+                  </option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  {data.overrides.max_concurrent_agents
+                    ? "Project override is set. Choose 'Use global default' to clear."
+                    : `Using the global default (${data.defaults.max_concurrent_agents}). Lower this on modest hardware — 3 local models in parallel can overload a small GPU.`}
+                </p>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="project-playwright-enabled"
+                  className="text-sm font-medium text-foreground"
+                >
+                  Playwright verification
+                </label>
+                <select
+                  id="project-playwright-enabled"
+                  name="project-playwright-enabled"
+                  data-testid="project-settings-playwright-enabled-select"
+                  value={playwrightEnabled}
+                  onChange={(e) => setPlaywrightEnabled(e.target.value)}
+                  disabled={submitting}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <option value="">
+                    Use global default ({describePlaywrightEnabled(
+                      data.defaults.playwright_enabled,
+                    )})
+                  </option>
+                  <option value="false">Disabled</option>
+                  <option value="true">Enabled</option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  {data.overrides.playwright_enabled
+                    ? "Project override is set. Choose 'Use global default' to clear."
+                    : `Using the global default (${describePlaywrightEnabled(
+                        data.defaults.playwright_enabled,
+                      )}). When enabled, every completed feature is verified by launching Chromium against the dev server. Many small local models can't drive a browser reliably — leaving it off treats the coding agent's own success as the outcome.`}
+                </p>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="project-playwright-headed"
+                  className="text-sm font-medium text-foreground"
+                >
+                  Playwright headed browser
+                </label>
+                <select
+                  id="project-playwright-headed"
+                  name="project-playwright-headed"
+                  data-testid="project-settings-playwright-headed-select"
+                  value={playwrightHeaded}
+                  onChange={(e) => setPlaywrightHeaded(e.target.value)}
+                  disabled={submitting}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <option value="">
+                    Use global default ({describePlaywrightHeaded(
+                      data.defaults.playwright_headed,
+                    )})
+                  </option>
+                  <option value="false">Headless</option>
+                  <option value="true">Headed (visible window)</option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  {data.overrides.playwright_headed
+                    ? "Project override is set. Choose 'Use global default' to clear."
+                    : `Using the global default (${describePlaywrightHeaded(
+                        data.defaults.playwright_headed,
+                      )}). Applies when verification is on; CI forces headless.`}
+                </p>
+              </div>
+              <div
+                data-testid="project-settings-effective"
+                className="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground"
+              >
+                <p className="font-medium text-foreground">
+                  Currently effective
+                </p>
+                <p className="mt-1">
+                  Provider:{" "}
+                  <span>
+                    {PROVIDER_LABELS[
+                      isProvider(data.effective.provider)
+                        ? data.effective.provider
+                        : "lm_studio"
+                    ]}
+                  </span>
+                </p>
+                <p>
+                  URL:{" "}
+                  <span>
+                    {
+                      data.effective[
+                        urlKeyFor(
+                          isProvider(data.effective.provider)
+                            ? data.effective.provider
+                            : "lm_studio",
+                        )
+                      ]
+                    }
+                  </span>
+                </p>
+                <p>
+                  Model: <span>{data.effective.model}</span>
+                </p>
+                <p>
+                  Playwright verification:{" "}
+                  <span>
+                    {describePlaywrightEnabled(data.effective.playwright_enabled)}
+                  </span>
+                </p>
+                <p>
+                  Playwright headed:{" "}
+                  <span>
+                    {describePlaywrightHeaded(data.effective.playwright_headed)}
+                  </span>
+                </p>
+              </div>
+            </>
+          )}
+          {error && (
+            <p
+              role="alert"
+              data-testid="project-settings-error"
+              className="text-sm text-destructive"
+            >
+              {error}
+            </p>
+          )}
+          {saved && (
+            <p
+              data-testid="project-settings-saved"
+              className="text-sm text-green-500"
+            >
+              Saved.
+            </p>
+          )}
+        </DialogBody>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={submitting}
+            data-testid="project-settings-close"
+          >
+            Close
+          </Button>
+          <Button
+            type="submit"
+            disabled={loading || submitting}
+            data-testid="project-settings-save"
+          >
+            {submitting ? "Saving…" : "Save settings"}
+          </Button>
+        </DialogFooter>
+      </form>
+    </Dialog>
+  );
+}
+
+function ProviderProbeStatus({
+  provider,
+  probe,
+}: {
+  provider: ProviderId;
+  probe: ModelsProbe;
+}) {
+  const label = PROVIDER_LABELS[provider];
+  if (probe.status === "loading") {
+    return (
+      <p
+        data-testid="project-settings-provider-status"
+        className="text-xs text-muted-foreground"
+      >
+        Checking {label}…
+      </p>
+    );
+  }
+  if (probe.status === "ok") {
+    return (
+      <p
+        data-testid="project-settings-provider-status"
+        data-provider-ok="true"
+        className="text-xs text-green-500"
+      >
+        {label} reachable — {probe.models.length} model
+        {probe.models.length === 1 ? "" : "s"} available.
+      </p>
+    );
+  }
+  if (probe.status === "error") {
+    return (
+      <div
+        data-testid="project-settings-provider-status"
+        data-provider-ok="false"
+        className="rounded-md border border-dashed border-border bg-muted/40 p-2 text-xs text-muted-foreground"
+      >
+        <p className="font-medium text-foreground">{label} not detected</p>
+        <p className="mt-0.5">
+          Install from{" "}
+          <a
+            href={PROVIDER_INSTALL_URLS[provider]}
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            {PROVIDER_INSTALL_URLS[provider].replace(/^https?:\/\//, "")}
+          </a>
+          . Details: {probe.message}
+        </p>
+      </div>
+    );
+  }
+  return null;
+}
+
+function ModelField({
+  probe,
+  provider,
+  model,
+  onChange,
+  placeholder,
+  disabled,
+  overridden,
+}: {
+  probe: ModelsProbe;
+  provider: ProviderId;
+  model: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  disabled?: boolean;
+  overridden: boolean;
+}) {
+  if (probe.status === "ok" && probe.models.length > 0) {
+    const known = probe.models.includes(model);
+    return (
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor="project-model"
+          className="text-sm font-medium text-foreground"
+        >
+          Model
+        </label>
+        <select
+          id="project-model"
+          name="project-model"
+          data-testid="project-settings-model-select"
+          value={known ? model : ""}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <option value="">
+            {overridden ? "Use global default" : `Use global default (${placeholder})`}
+          </option>
+          {probe.models.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          {overridden
+            ? "Project override is set. Choose 'Use global default' to clear."
+            : `Models detected on the ${PROVIDER_LABELS[provider]} server.`}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <Field
+      label="Model"
+      id="project-model"
+      value={model}
+      onChange={onChange}
+      placeholder={placeholder}
+      disabled={disabled}
+      description={
+        overridden
+          ? "Project override is set. Clear to fall back to the global default."
+          : probe.status === "error"
+            ? "Provider unreachable — type a model id or fix the URL above."
+            : "Using the global default. Type a value to override."
+      }
+    />
+  );
+}
+
+function Field({
+  label,
+  id,
+  value,
+  onChange,
+  placeholder,
+  description,
+  disabled,
+}: {
+  label: string;
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  description: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="text-sm font-medium text-foreground">
+        {label}
+      </label>
+      <input
+        id={id}
+        name={id}
+        type="text"
+        data-testid={`project-settings-${id}-input`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        disabled={disabled}
+        spellCheck={false}
+        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+      />
+      <p className="text-xs text-muted-foreground">{description}</p>
+    </div>
+  );
+}
