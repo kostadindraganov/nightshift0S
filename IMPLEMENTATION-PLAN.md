@@ -1,7 +1,10 @@
 # Nightshift — Implementation Plan
 
 Status: 2026-06-10. Blueprint APPROVED (3-round Codex review). Step 0 done.
-**Resume point: Phase 2, task 2.1.** Phase 1 complete — GATE 1 passed.
+**Resume point: Phase 2, task 2.5** (run service). Phase 1 done (GATE 1 ✓);
+2.1–2.3 done & tested on macOS; 2.4 code-complete (nftables runtime verify
+pending Linux). 2.5–2.7 (tmux run service, forge/PR, CI gate) need live
+provider CLIs + GitHub — best done on the Linux deploy host.
 Specs that bind every task below:
 `docs/BLUEPRINT.md` (§3.12 overrides), `docs/SPEC-STATE-MACHINES.md`,
 `docs/SPEC-SCHEMA.md`, `docs/THREAT-MODEL.md`, `REUSE.md`.
@@ -52,23 +55,33 @@ events.seq gap-free; SSE delivers task.state_changed; / serves the SPA).
 Typecheck clean; 70/70 tests pass.
 
 ## Phase 2 — One coder path (Claude Code end-to-end)
-2.1 ☐ Provider conformance test harness + claude-code & codex conformance
-    suites (§3.12.30): resume works, structured output extractable,
-    cost reported? Results written to providers.capabilities_json
-    → verify: suites run in CI; router refuses unproven capabilities.
-2.2 ☐ Worktree service: sandcastle worktree create/reuse/lock + crypto-random
-    temp-branch suffix patch (BLUEPRINT §3.6 known gap)
-    → verify: parallel-claim test — no branch collisions, lock contention
-    fails fast.
-2.3 ☐ bwrap-lite sandbox profile (§3.12.22): private mount ns, binds
+2.1 ☑ Provider conformance test harness + claude-code & codex conformance
+    suites (§3.12.30): resume works, structured output extractable (XML-tag +
+    schema-repair, fail-closed), cost reported? Results → providers
+    .capabilities_json. `src/providers/` {types, schemaRepair, conformance,
+    router, claudeCode, codex}.
+    → verify: ☑ 31/31 — router REFUSES unproven caps (reviewer needs
+    structured_output); capabilities_json round-trips; fake-driver matrix.
+    Live claude/codex CLI probes run when the binaries are present.
+2.2 ☑ Worktree service (native plain-Promise port of sandcastle's
+    WorktreeManager — its internals aren't publicly exported & are Effect-
+    based; see REUSE.md): create/reuse/lock + crypto-random suffix, ff-only
+    reuse (never reset --hard), ADR-0004 no auto-teardown. `src/worktree/`.
+    → verify: ☑ 18/18 on REAL git — parallel-claim (10×, distinct branches),
+    lock contention fails fast (WorktreeLockError), reuse/dirty-preserve/prune.
+2.3 ☑ bwrap-lite sandbox profile (§3.12.22): private mount ns, binds
     (worktree rw, per-TASK HOME rw, provider auth ro, private /tmp), env
-    allowlist + **invariant test that FAILS CLOSED** (spawning disabled on
-    failure)
-    → verify: invariant test asserts no host /home, no SSH agent, only
-    declared binds.
-2.4 ☐ Egress allowlist (uid-scoped nftables or proxy) for provider APIs +
-    GitHub (§3.12.23); flag `unattended_untrusted_repos=false` until active
-    → verify: agent process cannot curl a non-allowlisted host.
+    allowlist + **invariant test that FAILS CLOSED** (spawn disabled on
+    failure OR when bwrap absent). `src/sandbox/` {profile, invariants, spawn}.
+    → verify: ☑ 27/27 — invariant test asserts no host /home, no SSH agent,
+    only declared binds; spawnSandboxed throws (no child) when bwrap absent.
+    NOTE: live bwrap namespace isolation is Linux-runtime, verified at deploy.
+2.4 ◑ Egress allowlist (uid-scoped nftables or proxy) for provider APIs +
+    GitHub (§3.12.23); flag `unattended_untrusted_repos=false` until active.
+    `src/egress/` {allowlist (ruleset gen, default-DROP), guard (refuse-gate)}.
+    → CODE-COMPLETE: 26/26 — ruleset default-drop + skuid scoping +
+    refuse-unattended gate tested. RUNTIME VERIFY ("agent cannot curl a
+    non-allowlisted host") is Linux/nftables — PENDING deploy.
 2.5 ☐ Run service: spawn claude-code in tmux (prompt-via-file trick §3.7.3),
     lifecycle hook bridge (adapt `ops/reference/hook.sh` → POST
     /runs/:id/events), Run state machine incl. interim-Stop /
