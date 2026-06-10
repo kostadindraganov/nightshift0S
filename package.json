@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "bun run src/server/main.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test src/db src/events src/server src/tasks src/config src/providers src/worktree src/sandbox/ src/egress",
+    "test": "bun test src/db src/events src/server src/tasks src/config src/providers src/worktree src/sandbox/ src/egress src/runs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run src/db/migrate.ts"
   },

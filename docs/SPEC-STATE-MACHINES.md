@@ -64,7 +64,7 @@ queued → starting → running ↔ awaiting_input
 | running | succeeded | watchdog: >5 min silent AND transcript tail is normal assistant text (missed hook) |
 | finishing | succeeded/failed | exit reason classification; cost/tokens hydrated if provider reports them (`priced` flag) |
 | running/awaiting_input/background_waiting | killed | manual stop, kill-budget exceeded (wall-clock), or task cancelled. Reap order: kill tmux → pkill CLI by session id → sleep 400 ms → filesystem/DB (tank §3.6) |
-| queued/starting | interrupted | startup reconciliation: process/tmux gone (tank/localforge) |
+| * (non-terminal) | interrupted | startup reconciliation: process/tmux gone — every non-terminal run whose session vanished across a restart (tank/localforge); distinct from `killed` (we reaped) and `failed` (it errored) |
 
 Startup reconciliation (boot): every run in a non-terminal state whose tmux
 session is gone → `interrupted`; its task returns coding→failed→backlog path

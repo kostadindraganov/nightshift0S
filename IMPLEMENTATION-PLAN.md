@@ -1,10 +1,11 @@
 # Nightshift — Implementation Plan
 
 Status: 2026-06-10. Blueprint APPROVED (3-round Codex review). Step 0 done.
-**Resume point: Phase 2, task 2.5** (run service). Phase 1 done (GATE 1 ✓);
-2.1–2.3 done & tested on macOS; 2.4 code-complete (nftables runtime verify
-pending Linux). 2.5–2.7 (tmux run service, forge/PR, CI gate) need live
-provider CLIs + GitHub — best done on the Linux deploy host.
+**Resume point: Phase 2, task 2.6** (forge service). Phase 1 done (GATE 1 ✓);
+2.1–2.3 + 2.5 done & tested on macOS (scripted agent); 2.4 code-complete
+(nftables runtime verify pending Linux). Remaining: 2.6 forge/PR + 2.7 CI gate
+(need live GitHub); plus xterm.js live-attach UI for 2.5 and live claude/codex
+tmux spawn — best finished on the Linux deploy host.
 Specs that bind every task below:
 `docs/BLUEPRINT.md` (§3.12 overrides), `docs/SPEC-STATE-MACHINES.md`,
 `docs/SPEC-SCHEMA.md`, `docs/THREAT-MODEL.md`, `REUSE.md`.
@@ -82,13 +83,18 @@ Typecheck clean; 70/70 tests pass.
     → CODE-COMPLETE: 26/26 — ruleset default-drop + skuid scoping +
     refuse-unattended gate tested. RUNTIME VERIFY ("agent cannot curl a
     non-allowlisted host") is Linux/nftables — PENDING deploy.
-2.5 ☐ Run service: spawn claude-code in tmux (prompt-via-file trick §3.7.3),
-    lifecycle hook bridge (adapt `ops/reference/hook.sh` → POST
-    /runs/:id/events), Run state machine incl. interim-Stop /
-    background_waiting, watchdog with transcript inspection, reap order
-    (kill tmux → pkill → 400ms → fs/db)
-    → verify: scripted task completes; kill/crash/orphan reconciliation
-    tests pass; live xterm.js attach works.
+2.5 ☑ Run service (`src/runs/`): Run state machine (transitions.ts, guarded
+    SQL, 1:1 SPEC §2 — incl. interim-Stop/background_waiting; boot-reconcile
+    edges broadened to any non-terminal→interrupted per §2 prose), spawn in
+    tmux via injectable Launcher + prompt-via-file (spawn.ts/launcher.ts),
+    lifecycle hook bridge POST /runs/:id/events + ops/hook.sh (hookBridge.ts/
+    runRoutes.ts), watchdog ADR-0019 (watchdog.ts), reap order + boot
+    reconciliation (reap.ts).
+    → verify: ☑ scripted task completes (engine.e2e), kill/crash/orphan
+    reconciliation tests pass (260 tests, scripted agent / real git).
+    PENDING (deploy host/browser): live claude/codex spawn under real tmux;
+    **live xterm.js attach** (not built). NOTE: 1 low-freq flaky test in the
+    real-git/tmux suites to harden.
 2.6 ☐ Forge service (host-side, worktree-distrusting §3.12.25): explicit
     remote URL, hooks disabled, config ignored, ref validation, secret-scan
     diff, push + open PR via GitHub REST; agent env has zero gh auth
