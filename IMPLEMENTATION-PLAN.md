@@ -1,7 +1,7 @@
 # Nightshift — Implementation Plan
 
 Status: 2026-06-10. Blueprint APPROVED (3-round Codex review). Step 0 done.
-**Resume point: Phase 1, task 1.3.** Specs that bind every task below:
+**Resume point: Phase 1, task 1.5.** Specs that bind every task below:
 `docs/BLUEPRINT.md` (§3.12 overrides), `docs/SPEC-STATE-MACHINES.md`,
 `docs/SPEC-SCHEMA.md`, `docs/THREAT-MODEL.md`, `REUSE.md`.
 
@@ -23,11 +23,11 @@ gate passes. ☐ open ☑ done
 1.2 ☑ Schema migration 0001 from SPEC-SCHEMA (all 13 tables + indexes +
     partial unique `one_active_run_per_task`)
     → verify: migration applies clean; invariant tests for unique/FK rules.
-1.3 ☐ Global event log + broker: adapt `reference/warren/events.ts`
+1.3 ☑ Global event log + broker: adapt `reference/warren/events.ts`
     (write-through DB → publish; subscribe→replay→tail with seq dedup;
     bounded buffers drop-oldest)
     → verify: gap-free stream test under concurrent writes.
-1.4 ☐ HTTP API skeleton (Bun.serve, route table, bearer auth w/
+1.4 ☑ HTTP API skeleton (Bun.serve, route table, bearer auth w/
     constant-time compare, /healthz /readyz /version)
     → verify: openapi-ish route list generated; auth rejects bad tokens.
 1.5 ☐ Task CRUD + state machine enforcement (guarded SQL transitions from
