@@ -32,7 +32,7 @@ const SPEC_ALLOWED: Record<TaskState, readonly TaskState[]> = {
 	draft: ["backlog", "cancelled"],
 	backlog: ["ready", "cancelled"],
 	ready: ["coding", "cancelled"],
-	coding: ["review", "failed", "cancelled"],
+	coding: ["review", "failed", "needs_human", "cancelled"],
 	review: ["coding", "approved", "needs_human", "cancelled"],
 	approved: ["merging", "cancelled"],
 	merging: ["done", "needs_human", "cancelled"],

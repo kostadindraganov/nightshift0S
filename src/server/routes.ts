@@ -365,7 +365,12 @@ export const routes: Route[] = [
 				}
 				return jsonError(409, "lost_race", `task ${id} was moved by a concurrent actor`);
 			}
-			return json({ task: result.task, from: result.from });
+			// A confirmed merge (→done is the only writer of merge_sha) can unblock
+				// dependents whose dependencies are now all merged (SPEC §6 / GATE 2).
+				if (result.task.state === "done") {
+					await recomputeReadiness(ctx.handle, ctx.events, result.task.projectId);
+				}
+				return json({ task: result.task, from: result.from });
 		},
 	},
 	// -- dependencies ----------------------------------------------------------

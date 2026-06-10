@@ -1,11 +1,13 @@
 # Nightshift — Implementation Plan
 
 Status: 2026-06-10. Blueprint APPROVED (3-round Codex review). Step 0 done.
-**Resume point: Phase 2, task 2.6** (forge service). Phase 1 done (GATE 1 ✓);
-2.1–2.3 + 2.5 done & tested on macOS (scripted agent); 2.4 code-complete
-(nftables runtime verify pending Linux). Remaining: 2.6 forge/PR + 2.7 CI gate
-(need live GitHub); plus xterm.js live-attach UI for 2.5 and live claude/codex
-tmux spawn — best finished on the Linux deploy host.
+**Resume point: live GATE 2 on the Linux deploy host.** Phase 1 done (GATE 1 ✓);
+Phase 2 services 2.1–2.7 + the GATE 2 orchestrator all built & logic-tested on
+macOS (356 tests). What remains is RUNTIME/NETWORK verification on the Linux
+host + live GitHub: stand up the live launcher/forge/CI clients and run the
+"fix typo" task end-to-end (real claude-code spawn → push → PR → human merge →
+dependents unblock). Also pending: 2.4 nftables enforcement, 2.6 live push/PR,
+2.7 live CI fetch, and the **xterm.js live-attach UI** (not built).
 Specs that bind every task below:
 `docs/BLUEPRINT.md` (§3.12 overrides), `docs/SPEC-STATE-MACHINES.md`,
 `docs/SPEC-SCHEMA.md`, `docs/THREAT-MODEL.md`, `REUSE.md`.
@@ -95,15 +97,31 @@ Typecheck clean; 70/70 tests pass.
     PENDING (deploy host/browser): live claude/codex spawn under real tmux;
     **live xterm.js attach** (not built). NOTE: 1 low-freq flaky test in the
     real-git/tmux suites to harden.
-2.6 ☐ Forge service (host-side, worktree-distrusting §3.12.25): explicit
-    remote URL, hooks disabled, config ignored, ref validation, secret-scan
-    diff, push + open PR via GitHub REST; agent env has zero gh auth
-    → verify: PR opens from a real task; secret-scan blocks a planted key;
-    agent worktree `git push` fails (no creds).
-2.7 ☐ CI gate + branch-freshness gate before PR (§3.12.12)
-    → verify: stale-base task gets rebased or blocked; red tests block PR.
-**GATE 2:** "fix typo in README" task goes task→coding→PR fully
-autonomously; human merges; dependents unblock on merge_sha.
+2.6 ◑ Forge service (`src/forge/`, host-side, worktree-distrusting §3.12.25):
+    worktree-distrust push builder (explicit remote, core.hooksPath=/dev/null,
+    --no-verify, local/global config nulled), ref validation, secret-scan diff
+    (10 rule classes, added-lines only), submodule/LFS ack, PR via GitHub REST
+    behind an injectable ForgeClient; prepareAndOpenPR 5-gate pipeline.
+    → verify: ☑ secret-scan BLOCKS a planted key (and blocks push+PR, no calls);
+    ☑ distrust flags asserted; agent env carries zero gh auth (host-side design).
+    DEPLOY-PENDING: live push + "PR opens from a real task" (need real remote +
+    host GITHUB_TOKEN).
+2.7 ◑ CI gate + branch-freshness gate before PR (`src/gate/`, §3.12.12):
+    checkBranchFreshness (fresh/rebase/block via merge-base on real git),
+    pure ciGate (required checks green) behind an injectable CiClient, prePrGate.
+    → verify: ☑ stale-base → rebase/block correct on real git; ☑ red/pending/
+    missing checks block, all-green passes. DEPLOY-PENDING: live CI status fetch
+    (GitHub Checks API).
+**GATE 2 ◑ (integration built & tested, 2026-06-11):** the autonomous coder
+loop is WIRED — `src/orchestrator/coder.ts`: `completeCoderRun` (run succeeded
+→ branch-freshness + CI gate → forge secret-scan/push/PR → task coding→review;
+ANY block → coding→needs_human, a NEW state-machine edge added here) +
+`confirmMergeAndUnblock` (merging→done(+merge_sha) → dependents unblock via
+recomputeReadiness). The transition API also recomputes readiness on →done.
+Verified on macOS with a scripted agent + injected fakes (forge/CI/pusher) +
+real git: orchestrator branches (review / needs_human / failed) and dependent
+unblock (356 tests). DEPLOY-PENDING: the fully-live "fix typo" run (real
+claude-code spawn + real GitHub push/PR + human merge) on the Linux host.
 
 ## Phase 3 — Review path (the ping-pong)
 3.1 ☐ Thread service: append-only thread_events with seq + idempotency keys;

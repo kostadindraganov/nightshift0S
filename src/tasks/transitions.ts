@@ -63,6 +63,9 @@ export const TASK_TRANSITIONS: readonly TaskTransition[] = [
 	{ from: "ready", to: "coding", trigger: "claim" },
 	{ from: "coding", to: "review", trigger: "coder_succeeded" },
 	{ from: "coding", to: "failed", trigger: "coder_failed" },
+	// Coder run succeeded but a pre-PR gate blocked (secret scan / CI red /
+	// stale-base block / PR open failed) — escalate instead of advancing.
+	{ from: "coding", to: "needs_human", trigger: "gate_blocked" },
 	{ from: "review", to: "coding", trigger: "revise" },
 	{ from: "review", to: "approved", trigger: "approve" },
 	{ from: "review", to: "needs_human", trigger: "escalate" },

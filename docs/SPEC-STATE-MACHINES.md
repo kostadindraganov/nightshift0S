@@ -26,6 +26,7 @@ any non-terminal → cancelled
 | ready | coding | **atomic claim**: `UPDATE tasks SET state='coding', claimed_by=:runner WHERE id=:id AND state='ready'`; plus worktree file-lock acquired (BLUEPRINT §3.6); plus partial unique index `one_active_run_per_task` |
 | coding | review | coder run `succeeded` AND CI gate green AND branch-freshness gate passed AND forge service opened PR |
 | coding | failed | coder run terminal-failed after auto-triage retry policy |
+| coding | needs_human | coder run succeeded but a pre-PR gate blocked (secret scan / CI red / stale-base block / forge PR-open failed) — escalate; the work can't auto-advance to review |
 | review | coding | review round verdict = `revise` AND round < K — same coder session resumed |
 | review | approved | review round verdict = `approved` |
 | review | needs_human | round = K without approval; OR deadlock after tiebreaker; OR schema-repair exhausted |
