@@ -1,7 +1,8 @@
 # Nightshift — Implementation Plan
 
 Status: 2026-06-10. Blueprint APPROVED (3-round Codex review). Step 0 done.
-**Resume point: Phase 1, task 1.6.** Specs that bind every task below:
+**Resume point: Phase 2, task 2.1.** Phase 1 complete — GATE 1 passed.
+Specs that bind every task below:
 `docs/BLUEPRINT.md` (§3.12 overrides), `docs/SPEC-STATE-MACHINES.md`,
 `docs/SPEC-SCHEMA.md`, `docs/THREAT-MODEL.md`, `REUSE.md`.
 
@@ -34,16 +35,21 @@ gate passes. ☐ open ☑ done
     SPEC-STATE-MACHINES §6) + dependency table with BFS cycle check
     (port from `ui-reference/features.ts`)
     → verify: illegal-transition test matrix (every from→to pair).
-1.6 ☐ Design tokens (`design-tokens.json`: dark base, signal accent,
-    status colors, type pair) + app shell (adapt `ui-reference/app-shell`)
-    + minimal kanban board (adapt `ui-reference/kanban`) reading live SSE
-    from the event stream
-    → verify: board renders tasks, drag-drop persists, restyled (no
-    localforge look), SSE updates live.
-1.7 ☐ Config file + env loader + read-only Settings page (§3.12.19)
-    → verify: every knob in config renders in UI read-only.
-**GATE 1:** create/move tasks in UI, events stream live, state machine
-holds under concurrent API hammering.
+1.6 ☑ Design tokens (`web/design-tokens.json` + `web/styles/tokens.css`) +
+    Bun-fullstack React app shell (`web/`) + minimal kanban board reading
+    live SSE from the event stream (drag-drop enforces the transition law).
+    → verify: ☑ board renders tasks, drag-drop persists via transition/PATCH
+    API, restyled (ClickHouse dark+yellow tokens, no localforge look), SSE
+    updates live (fetch+ReadableStream, bearer-auth'd).
+1.7 ☑ Config file + env loader (`src/config/config.ts`, file<-env merge) +
+    read-only Settings page (GET /config → `describeConfig`, §3.12.19)
+    → verify: ☑ all 21 config knobs render read-only in the UI with
+    value/source/scope; secrets masked.
+**GATE 1 ☑ (2026-06-10):** create/move tasks in UI, events stream live,
+state machine holds under concurrent API hammering — verified by
+`src/server/gate1.test.ts` (20-way concurrent transition: exactly 1 wins,
+events.seq gap-free; SSE delivers task.state_changed; / serves the SPA).
+Typecheck clean; 70/70 tests pass.
 
 ## Phase 2 — One coder path (Claude Code end-to-end)
 2.1 ☐ Provider conformance test harness + claude-code & codex conformance

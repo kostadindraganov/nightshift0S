@@ -6,15 +6,23 @@
   "workspaces": ["vendor/sandcastle"],
   "scripts": {
     "dev": "bun run src/server/main.ts",
+    "typecheck": "tsc --noEmit",
     "test": "bun test src/db src/events src/server src/tasks",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run src/db/migrate.ts"
   },
   "dependencies": {
-    "drizzle-orm": "^0.45.2"
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "drizzle-orm": "^0.45.2",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "drizzle-kit": "^0.31.10",
     "typescript": "^6.0.3"
   }

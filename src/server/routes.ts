@@ -15,6 +15,7 @@ import { join } from "node:path";
 import type { DbHandle } from "../db/client.ts";
 import type { TaskState } from "../db/columns.ts";
 import type { EventLog } from "../events/events.ts";
+import { configRoutes } from "../config/settingsRoutes.ts";
 import {
 	addDependency,
 	recomputeReadiness,
@@ -453,6 +454,8 @@ export const routes: Route[] = [
 			});
 		},
 	},
+	// -- config (read-only registry) -------------------------------------------
+	...configRoutes,
 ];
 
 /** Openapi-ish description generated FROM the table — never hand-written. */

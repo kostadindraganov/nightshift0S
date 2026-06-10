@@ -4,6 +4,8 @@
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"moduleDetection": "force",
+		"lib": ["ESNext", "DOM", "DOM.Iterable"],
+		"jsx": "react-jsx",
 		"allowImportingTsExtensions": true,
 		"verbatimModuleSyntax": true,
 		"noEmit": true,
@@ -13,6 +15,6 @@
 		"skipLibCheck": true,
 		"types": ["bun"]
 	},
-	"include": ["src", "drizzle.config.ts"],
+	"include": ["src", "web", "drizzle.config.ts"],
 	"exclude": ["node_modules", "vendor", "reference", "ui-reference"]
 }

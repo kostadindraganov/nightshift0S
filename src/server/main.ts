@@ -9,6 +9,7 @@
  * 503 auth unconfigured or not ready, 500 handler crash.
  */
 
+import index from "../../web/index.html";
 import { openDatabase } from "../db/client.ts";
 import { runMigrations } from "../db/migrate.ts";
 import { EventLog } from "../events/events.ts";
@@ -23,6 +24,8 @@ export interface CreateServerOptions {
 	port?: number;
 	/** DB path passed to openDatabase; default NIGHTSHIFT_DB_PATH or data/nightshift.db. */
 	dbPath?: string;
+	/** When true, enables Bun HMR + console forwarding for the bundled SPA. */
+	dev?: boolean;
 }
 
 export function createServer(options: CreateServerOptions = {}): Bun.Server<undefined> {
@@ -35,9 +38,12 @@ export function createServer(options: CreateServerOptions = {}): Bun.Server<unde
 
 	return Bun.serve({
 		port,
+		// Serve the bundled React SPA at /; the fetch handler covers all API paths.
+		routes: { "/": index },
 		// Must exceed the SSE heartbeat interval (15s) or Bun would reset idle
 		// event-stream connections between heartbeats (default is 10s).
 		idleTimeout: 60,
+		...(options.dev ? { development: { hmr: true, console: true } } : {}),
 		async fetch(req) {
 			const url = new URL(req.url);
 			const match = matchRoute(routes, req.method, url.pathname);
@@ -67,6 +73,6 @@ export function createServer(options: CreateServerOptions = {}): Bun.Server<unde
 }
 
 if (import.meta.main) {
-	const server = createServer();
+	const server = createServer({ dev: true });
 	console.log(`nightshift listening on ${server.url}`);
 }

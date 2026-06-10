@@ -1,0 +1,54 @@
+{
+  "_comment": "Copy this file to nightshift.config.json and adjust as needed. All values shown are defaults. Env vars override file values: NIGHTSHIFT_PORT, NIGHTSHIFT_HOST, NIGHTSHIFT_DB_PATH, NIGHTSHIFT_LOG_LEVEL.",
+
+  "server": {
+    "port": 3000,
+    "host": "127.0.0.1"
+  },
+
+  "database": {
+    "path": "data/nightshift.db"
+  },
+
+  "providers": {
+    "defaultCoder": "claude-code",
+    "defaultReviewer": "codex",
+    "claudeCodeEnabled": true,
+    "codexEnabled": true
+  },
+
+  "concurrency": {
+    "maxParallelSlots": 1,
+    "perProviderCap": 1
+  },
+
+  "budgets": {
+    "wallClockSecondsPerRun": 3600,
+    "advisoryTokensPerRun": 200000
+  },
+
+  "timeouts": {
+    "runStartSeconds": 60,
+    "watchdogSeconds": 300,
+    "reapGraceMs": 5000
+  },
+
+  "review": {
+    "maxRounds": 3,
+    "autoMergeEnabled": false
+  },
+
+  "sandbox": {
+    "homeRoot": "/tmp/nightshift-sandboxes",
+    "egressAllowlist": [],
+    "unattendedUntrustedRepos": false
+  },
+
+  "forge": {
+    "provider": "github"
+  },
+
+  "logging": {
+    "level": "info"
+  }
+}
