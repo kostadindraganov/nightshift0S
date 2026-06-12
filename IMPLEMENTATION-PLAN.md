@@ -169,23 +169,28 @@ REMAINING for live V1: live planner-agent spawn (Codex/Gemini task-planning CLI 
 5.1 ☐ Auto-merge unlock behind preflight (§3.12.26) — verify protections,
     trusted check apps, fresh SHA, no bypass perms, every time
 5.2 ☐ Editable scoped settings registry + audit events (§3.12.19)
-5.3 ☐ Parallel slots: atomic claiming, slot-filling scheduler (§3.7.1)
+5.3 ☑ Parallel slots: atomic claiming, slot-filling scheduler (§3.7.1)
+    → built & logic-tested on macOS (fakes); unattended-live on Linux = GATE 5
 5.4 ☐ Provider matrix: gemini-cli, antigravity, opencode CLI drivers +
     openrouter/local API drivers — each behind conformance tests
-5.5 ☐ Subscription capacity pools (§3.12.14): observed 429/auth signals,
+5.5 ☑ Subscription capacity pools (§3.12.14): observed 429/auth signals,
     cooldowns, concurrency caps; overflow policy subscription→api_key
+    → built & logic-tested on macOS (fakes); unattended-live on Linux = GATE 5
 5.6 ☐ Risk tiers + specialist reviewers + coordinator (§3.4); circuit
     breakers with failback-vs-routing policy split (§3.12.18)
-5.7 ☐ Budgets: hard wall-clock universal, token/$ advisory where priced
+5.7 ☑ Budgets: hard wall-clock universal, token/$ advisory where priced
+    → built & logic-tested on macOS (fakes); unattended-live on Linux = GATE 5
 5.8 ☐ Transcript browser (events-only); notifier + Telegram channel;
     auth health panel; routines + manual/cron triggers w/ authz
-5.9 ☐ Failure auto-triage (haiku-class classifier → retry/reassign/human)
+5.9 ☑ Failure auto-triage (haiku-class classifier → retry/reassign/human)
+    → built & logic-tested on macOS (fakes); unattended-live on Linux = GATE 5
 5.10 ◑ deploy.sh + systemd (adapt ops/reference) → Linux VM install
     → CODE-COMPLETE: ops/deploy.sh (env setup, service install, launch),
     ops/nightshift.service (systemd unit), ops/egress-apply.sh + ops/egress-teardown.sh
     (nftables enforcement). Live deployment requires Linux host + GITHUB_TOKEN + test.
-**GATE 5:** factory runs unattended overnight on a trusted repo; morning
-digest shows merged PRs.
+**GATE 5:** core built (scheduler + capacity + budgets + triage modules; 429 tests pass
+on macOS with injectable fakes). Factory unattended-live overnight on Linux host
+= pending; morning digest shows merged PRs.
 
 ## Phase 6 — V2 (listed; spec in BLUEPRINT §4 step 6)
 Webhook/chat triggers, Playwright verification (opt-in), per-project agent

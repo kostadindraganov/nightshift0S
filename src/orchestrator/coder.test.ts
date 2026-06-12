@@ -16,6 +16,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { eq } from "drizzle-orm";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -758,5 +759,78 @@ describe("startCoderTask egress gate", () => {
 		const runCount = handle.db.select().from(runs).all().length;
 		expect(runCount).toBe(0);
 		expect(getTask(handle, taskId)?.state).toBe("ready");
+	});
+
+	// Finding 1 (critical): a spawn failure AFTER a successful claim must roll
+	// BOTH the run (→ killed) and the task (→ failed) back, or the queued run +
+	// coding task become a zombie that permanently occupies a scheduler slot and
+	// the provider cap (deadlocking the unattended loop at maxParallelSlots=1).
+	// This is the one branch the rest of the suite never exercises, so it gets a
+	// single hermetic case (launcher throws — platform-independent).
+	test("spawn failure after a successful claim rolls back run→killed AND task→failed", async () => {
+		const now = new Date().toISOString();
+		const taskId = handle.db
+			.insert(tasks)
+			.values({
+				projectId,
+				title: "rollback task",
+				state: "ready",
+				priority: 0,
+				createdAt: now,
+				updatedAt: now,
+			})
+			.returning()
+			.get().id;
+
+		// Launcher that throws on launch — deterministic spawn failure on any OS.
+		const throwingLauncher: import("../runs/launcher.ts").Launcher = {
+			async launch() {
+				throw new Error("tmux unavailable");
+			},
+			async isAlive() {
+				return false;
+			},
+			async kill() {
+				// rollback's run→killed may also kill the (never-created) session.
+			},
+		};
+
+		// Get past the macOS sandbox fail-closed so we reach the launcher branch.
+		const prev = process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER;
+		process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER = "1";
+		let result: Awaited<ReturnType<typeof startCoderTask>>;
+		try {
+			result = await startCoderTask(
+				{ handle, log, launcher: throwingLauncher },
+				{
+					taskId,
+					provider: "claude-code",
+					model: "cli-default",
+					authLane: "subscription",
+					prompt: "do the work",
+					repoDir,
+					homeRoot: repoDir,
+					unattended: false,
+				},
+				// Egress probe is irrelevant for an attended spawn, but pin it.
+				{ egressActive: async () => true },
+			);
+		} finally {
+			if (prev === undefined) delete process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER;
+			else process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER = prev;
+		}
+
+		// Caller sees a refusal, not a throw.
+		expect(result.ok).toBe(false);
+
+		// The claimed task is rolled back to `failed` (so the failed→backlog
+		// demote/triage path can requeue it) — NOT stuck in `coding`.
+		expect(getTask(handle, taskId)?.state).toBe("failed");
+
+		// The run exists but is TERMINAL (killed), so it occupies neither a
+		// scheduler slot nor the provider cap (both count non-terminal runs only).
+		const taskRuns = handle.db.select().from(runs).where(eq(runs.taskId, taskId)).all();
+		expect(taskRuns).toHaveLength(1);
+		expect(taskRuns[0]?.state).toBe("killed");
 	});
 });

@@ -17,6 +17,7 @@ import { transitionTask } from "../tasks/transitions.ts";
 import { recomputeReadiness } from "../tasks/dependencies.ts";
 import { getRun } from "../runs/runs.ts";
 import { claimTaskAndCreateRun } from "../runs/runs.ts";
+import { transitionRun } from "../runs/transitions.ts";
 import { spawnRun } from "../runs/spawn.ts";
 import type { SpawnDeps } from "../runs/spawn.ts";
 import type { AuthLane, RunKind } from "../db/columns.ts";
@@ -324,15 +325,41 @@ export async function startCoderTask(
 		return { ok: false, reason: claim.reason };
 	}
 
-	// Spawn the run (worktree, home dir, launch).
-	const run = await spawnRun(deps, {
-		taskId: input.taskId,
-		runId: claim.run.id,
-		provider: input.provider,
-		prompt: input.prompt,
-		repoDir: input.repoDir,
-		homeRoot: input.homeRoot,
-	});
+	// Spawn the run (worktree, home dir, launch). The claim above already moved
+	// the task ready→coding and inserted a queued run; spawnRun can throw on a
+	// worktree/launcher/sandbox failure or a lost queued→starting race, all of
+	// which leave the run non-terminal ('queued') and the task stuck in 'coding'
+	// — a zombie that permanently occupies a scheduler slot AND the provider cap.
+	// Roll BOTH back on any throw so the slot/cap are freed and the existing
+	// failed→backlog triage/requeue path can re-attempt the task.
+	let run: RunRow;
+	try {
+		run = await spawnRun(deps, {
+			taskId: input.taskId,
+			runId: claim.run.id,
+			provider: input.provider,
+			prompt: input.prompt,
+			repoDir: input.repoDir,
+			homeRoot: input.homeRoot,
+		});
+	} catch (err) {
+		// (1) Run → killed from ANY active state (no expectedFrom: spawnRun may
+		// have advanced it queued→starting before failing the post-launch race).
+		await transitionRun(handle, log, {
+			runId: claim.run.id,
+			to: "killed",
+			actor: "spawn_rollback",
+		});
+		// (2) Task coding→failed so the failed→backlog demote/triage path requeues
+		// it. A lost race (another actor already moved the task) is a tolerated no-op.
+		await transitionTask(handle, log, {
+			taskId: input.taskId,
+			to: "failed",
+			expectedFrom: "coding",
+			actor: "spawn_rollback",
+		});
+		return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+	}
 
 	return { ok: true, run };
 }

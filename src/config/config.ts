@@ -34,10 +34,20 @@ export interface NightshiftConfig {
 	concurrency: {
 		maxParallelSlots: number;
 		perProviderCap: number;
+		schedulerIntervalSeconds: number;
+		schedulerDebounceMs: number;
+	};
+	capacity: {
+		cooldownSeconds: number;
+		overflowToApiKey: boolean;
 	};
 	budgets: {
 		wallClockSecondsPerRun: number;
 		advisoryTokensPerRun: number;
+		hardCostUsdPerRun: number;
+	};
+	triage: {
+		maxRetries: number;
 	};
 	timeouts: {
 		runStartSeconds: number;
@@ -89,10 +99,21 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
 	concurrency: {
 		maxParallelSlots: 1,
 		perProviderCap: 1,
+		schedulerIntervalSeconds: 30,
+		schedulerDebounceMs: 250,
+	},
+	capacity: {
+		cooldownSeconds: 300,
+		// Fail-closed: no silent paid overflow from subscription → api_key.
+		overflowToApiKey: false,
 	},
 	budgets: {
 		wallClockSecondsPerRun: 3600,
 		advisoryTokensPerRun: 200000,
+		hardCostUsdPerRun: 0,
+	},
+	triage: {
+		maxRetries: 2,
 	},
 	timeouts: {
 		runStartSeconds: 60,

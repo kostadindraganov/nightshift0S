@@ -69,3 +69,29 @@ End-to-end (scripted reviewer/fakes + real git/DB): task → code → PR → rev
 - Commit `6cb4208` on `main` contains **only** `IMPLEMENTATION-PLAN.md` + `docs/PHASE3-SUMMARY.md`.
 - **All Phase 3/4 source is still uncommitted** in the working tree.
 - Not pushed. The commit message claims "385 tests ✓" (actually 384 + 1 pre-existing flaky).
+
+---
+
+## Phase 5 Batch A — Unattended Factory Core (2026-06-13)
+
+**Status:** 4 modules built & logic-tested on macOS with injectable fakes; 429 total tests pass.
+
+### Modules delivered:
+- **5.3 Scheduler** (`src/scheduler/scheduler.ts`, `scheduler.test.ts`) — Parallel slot-filling with atomic task claiming + ready-list priority ordering. Tests: slot contention, readiness gates, claim races.
+- **5.5 Capacity Pools** (`src/providers/capacity.ts`, `capacity.test.ts`) — 429/auth-limit signal handling, cooldown + circuit breaker, per-provider concurrency caps. Tests: signal classification, decision trees, state transitions.
+- **5.7 Budgets** (`src/runs/budget.ts`, `budget.test.ts`) — Hard wall-clock limit per run, token/$ advisory tracking, enforcement gates. Tests: boundary conditions, overage handling, injection of time/cost.
+- **5.9 Failure Triage** (`src/orchestrator/triage.ts`, `triage.test.ts`) — Haiku-class classifier on run exit, maps exit-reason → signal kind, gates escalation to human. Tests: classification accuracy, confidence thresholds, demote/retry/human routing.
+
+### Verification:
+- ✅ `bun run typecheck` — **clean (0 errors)**.
+- ✅ `bun run test` — **429 pass / 0 fail** across all suites.
+- All 4 modules wired for macOS local-only operation (no tmux, no network, no live agents).
+- Per PHASE5A-CONTRACT: injectable deps, fail-closed on every gate, no retry loops.
+
+### Next: Linux unattended-live
+- Scheduler awakened by wake-events (task.state_changed, run.state_changed) in the control loop.
+- Live tmux spawn (real coder-code agents) gates on capacity checks.
+- Budgets enforced at run spawn (wallClockSecondsPerRun) + watchdog (escalate at advisoryTokens).
+- Triage classifier observes real run outcomes (exit_reason on Linux reap) and drives re-triage → demote/reassign/human.
+- GATE 5 target: factory overnight unattended on Linux trusted repo.
+
