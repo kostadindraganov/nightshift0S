@@ -24,7 +24,7 @@ import { createServer } from "./main.ts";
 const TOKEN = "gate1-test-token";
 const ORIGINAL_TOKEN = process.env.NIGHTSHIFT_API_TOKEN;
 
-let server: Bun.Server<undefined>;
+let server: ReturnType<typeof createServer>;
 
 function url(path: string): URL {
 	return new URL(path, server.url);
@@ -297,7 +297,7 @@ describe("(d) concurrency", () => {
 // (d2) Concurrency with a real file DB so we can inspect events seq
 
 describe("(d2) concurrency seq gap-free with file DB", () => {
-	let fileServer: Bun.Server<undefined>;
+	let fileServer: ReturnType<typeof createServer>;
 	const tmpDb = `/tmp/gate1-concurrency-${Date.now()}.db`;
 
 	beforeEach(() => {

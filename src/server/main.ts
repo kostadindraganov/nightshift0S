@@ -16,6 +16,12 @@ import { EventLog } from "../events/events.ts";
 import { ValidationError } from "../tasks/tasks.ts";
 import { authenticate } from "./auth.ts";
 import { jsonError, matchRoute, routes, type RouteContext } from "./routes.ts";
+import {
+	makeTermWebsocket,
+	matchTermPath,
+	handleTermUpgrade,
+	type TermSocketData,
+} from "./terminalRoutes.ts";
 
 export const DEFAULT_PORT = 3000;
 
@@ -28,7 +34,7 @@ export interface CreateServerOptions {
 	dev?: boolean;
 }
 
-export function createServer(options: CreateServerOptions = {}): Bun.Server<undefined> {
+export function createServer(options: CreateServerOptions = {}): Bun.Server<TermSocketData> {
 	const port = options.port ?? Number(process.env.NIGHTSHIFT_PORT ?? DEFAULT_PORT);
 	// Open + migrate before serving so /readyz is honest from the first request.
 	const handle = openDatabase(options.dbPath);
@@ -36,16 +42,28 @@ export function createServer(options: CreateServerOptions = {}): Bun.Server<unde
 	// One event log per server — the write-through emitter AND the SSE source.
 	const events = new EventLog(handle);
 
-	return Bun.serve({
+	return Bun.serve<TermSocketData>({
 		port,
 		// Serve the bundled React SPA at /; the fetch handler covers all API paths.
 		routes: { "/": index },
 		// Must exceed the SSE heartbeat interval (15s) or Bun would reset idle
 		// event-stream connections between heartbeats (default is 10s).
 		idleTimeout: 60,
+		// Read-only xterm attach to a run's tmux pane (LIVE-WIRING D4). The
+		// handler is server-level; the fetch handler does the upgrade below.
+		websocket: makeTermWebsocket(handle),
 		...(options.dev ? { development: { hmr: true, console: true } } : {}),
-		async fetch(req) {
+		async fetch(req, server) {
 			const url = new URL(req.url);
+			// WebSocket terminal attach (D4): handled BEFORE matchRoute. On upgrade
+			// Bun owns the socket and fetch returns undefined; a refusal Response is
+			// returned as-is (503 auth unset / 401 bad token / 404 / 409 no session).
+			const termId = matchTermPath(url.pathname);
+			if (termId !== null && req.method === "GET") {
+				const refusal = handleTermUpgrade(server, req, url, handle);
+				if (refusal !== undefined) return refusal;
+				return undefined as never; // upgraded — Bun owns the socket now.
+			}
 			const match = matchRoute(routes, req.method, url.pathname);
 			if (match.kind === "no_match") {
 				return jsonError(404, "not_found", `no route for ${url.pathname}`);

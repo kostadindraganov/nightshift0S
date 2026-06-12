@@ -58,18 +58,18 @@ export class TmuxLauncher implements Launcher {
 		// each token is safe for tokens that may contain spaces.
 		const shellStr = command.map((t) => `'${t.replace(/'/g, "'\\''")}'`).join(" ");
 
-		// Merge caller env on top of the current process env so LC_ALL=C applies
-		// to the tmux invocation itself, and the child inherits the merged env.
-		const mergedEnv: Record<string, string> = {
-			...Object.fromEntries(
-				Object.entries(process.env).filter(([, v]) => v !== undefined) as [string, string][],
-			),
-			...env,
-			LC_ALL: "C",
-		};
+		// SESSION env (HOST-SIDE TOKEN INVARIANT, LIVE-WIRING §0): only the caller's
+		// explicit allowlist is injected into the coder's tmux session via `-e`.
+		// process.env is NOT merged here — doing so would smuggle GITHUB_TOKEN,
+		// ANTHROPIC_API_KEY, OPENAI_API_KEY, NIGHTSHIFT_API_TOKEN and SSH_AUTH_SOCK
+		// onto the session env (readable via /proc/self/environ) AND onto the tmux
+		// process argv (visible via `ps aux`). The coder must receive only what
+		// buildAgentInvocation constructed.
+		const sessionEnv: Record<string, string> = { ...env, LC_ALL: "C" };
 
-		// Pass each env var as `-e KEY=VALUE` so tmux injects them into the session.
-		const envArgs = Object.entries(mergedEnv).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
+		// Pass each session env var as `-e KEY=VALUE` so tmux injects them into
+		// the session — allowlist only, never the launcher's process env.
+		const envArgs = Object.entries(sessionEnv).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
 
 		const proc = Bun.spawn(
 			[
@@ -84,7 +84,9 @@ export class TmuxLauncher implements Launcher {
 				shellStr,
 			],
 			{
-				env: mergedEnv,
+				// The tmux CLIENT process needs PATH (and friends) to exec tmux;
+				// this env is NOT inherited by the session (that comes from `-e`).
+				env: { ...process.env, LC_ALL: "C" },
 				stdout: "pipe",
 				stderr: "pipe",
 			},

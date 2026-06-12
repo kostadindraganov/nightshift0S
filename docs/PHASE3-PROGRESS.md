@@ -56,13 +56,14 @@ Legend: ✅ done & verified · ◑ partial (see note) · ☐ not built (deploy-p
 ## GATE 3 ◑ — review path: BUILT & logic-tested on macOS
 End-to-end (scripted reviewer/fakes + real git/DB): task → code → PR → review verdict → revise round → approved → human merge. The V1 demo loop is wired.
 
-## Deploy-pending (needs Linux host + live GitHub — out of scope on macOS)
-- Live Codex/Gemini **reviewer**-CLI spawn under real tmux (here: injectable scripted reviewer).
-- Live Codex/Gemini **planner**-CLI spawn (here: injectable scripted client).
-- **xterm.js live-attach** terminal in TaskDetailView (placeholder panel rendered).
-- ~~Project bootstrap chat view (paste-a-plan intake UI)~~ — **DONE** (`web/views/IntakeView.tsx`); only live planner-CLI spawn remains.
-- Live coder-session `--resume` wiring in `spawn.ts` (today: injectable `resumeCoder` dep; no real CLI resume).
-- Live GitHub push/PR + CI Checks API polling (Phase 2 deploy items); nftables egress enforcement.
+## CODE-COMPLETE — Linux runtime-verify pending (all require `ops/deploy.sh` + Linux host + GitHub env)
+- Phase 2.5: Live claude-code **coder**-CLI spawn (real tmux); session `--resume` wiring in `spawn.ts`.
+- Phase 2.6: Live GitHub push/PR from real forge runs (GITHUB_TOKEN).
+- Phase 2.7: Live CI Checks API polling before PR merge (GITHUB_TOKEN).
+- Phase 2.4: nftables egress enforcement (`ops/egress-apply.sh`); verify agent cannot reach unlisted hosts.
+- Phase 3: Live Codex/Gemini **reviewer**-CLI spawn (real tmux); **xterm.js live-attach** terminal (WebSocket); live PR diff fetch.
+- Phase 4: Live Codex/Gemini **planner**-CLI spawn (real tmux).
+- 5.10: ops/deploy.sh + ops/nightshift.service + ops/egress-apply.sh on Linux host.
 
 ## Git status (unresolved — owner to decide)
 - Commit `6cb4208` on `main` contains **only** `IMPLEMENTATION-PLAN.md` + `docs/PHASE3-SUMMARY.md`.

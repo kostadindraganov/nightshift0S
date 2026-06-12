@@ -82,36 +82,35 @@ Typecheck clean; 70/70 tests pass.
 2.4 ◑ Egress allowlist (uid-scoped nftables or proxy) for provider APIs +
     GitHub (§3.12.23); flag `unattended_untrusted_repos=false` until active.
     `src/egress/` {allowlist (ruleset gen, default-DROP), guard (refuse-gate)}.
-    → CODE-COMPLETE: 26/26 — ruleset default-drop + skuid scoping +
-    refuse-unattended gate tested. RUNTIME VERIFY ("agent cannot curl a
-    non-allowlisted host") is Linux/nftables — PENDING deploy.
-2.5 ☑ Run service (`src/runs/`): Run state machine (transitions.ts, guarded
+    → CODE-COMPLETE — Linux runtime-verify pending: ruleset default-drop + skuid scoping +
+    refuse-unattended gate tested; live nftables enforcement ("agent cannot curl a
+    non-allowlisted host") requires ops/egress-apply.sh + Linux host.
+2.5 ◑ Run service (`src/runs/`): Run state machine (transitions.ts, guarded
     SQL, 1:1 SPEC §2 — incl. interim-Stop/background_waiting; boot-reconcile
     edges broadened to any non-terminal→interrupted per §2 prose), spawn in
     tmux via injectable Launcher + prompt-via-file (spawn.ts/launcher.ts),
     lifecycle hook bridge POST /runs/:id/events + ops/hook.sh (hookBridge.ts/
     runRoutes.ts), watchdog ADR-0019 (watchdog.ts), reap order + boot
     reconciliation (reap.ts).
-    → verify: ☑ scripted task completes (engine.e2e), kill/crash/orphan
-    reconciliation tests pass (260 tests, scripted agent / real git).
-    PENDING (deploy host/browser): live claude/codex spawn under real tmux;
-    **live xterm.js attach** (not built). NOTE: 1 low-freq flaky test in the
-    real-git/tmux suites to harden.
+    → CODE-COMPLETE — Linux runtime-verify pending: ☑ scripted task completes;
+    ☑ kill/crash/orphan reconciliation passes (260 tests). Live claude-code spawn,
+    session --resume wiring, and xterm.js live-attach terminal require ops/deploy.sh
+    + Linux host + browser. NOTE: 1 low-freq flaky test (crypto-random suffix collision)
+    to harden separately.
 2.6 ◑ Forge service (`src/forge/`, host-side, worktree-distrusting §3.12.25):
     worktree-distrust push builder (explicit remote, core.hooksPath=/dev/null,
     --no-verify, local/global config nulled), ref validation, secret-scan diff
     (10 rule classes, added-lines only), submodule/LFS ack, PR via GitHub REST
     behind an injectable ForgeClient; prepareAndOpenPR 5-gate pipeline.
-    → verify: ☑ secret-scan BLOCKS a planted key (and blocks push+PR, no calls);
-    ☑ distrust flags asserted; agent env carries zero gh auth (host-side design).
-    DEPLOY-PENDING: live push + "PR opens from a real task" (need real remote +
-    host GITHUB_TOKEN).
+    → CODE-COMPLETE — Linux runtime-verify pending: ☑ secret-scan BLOCKS planted key;
+    ☑ distrust flags asserted; agent env carries zero gh auth. Live push + PR opens
+    requires ops/deploy.sh + real GITHUB_TOKEN + Linux host.
 2.7 ◑ CI gate + branch-freshness gate before PR (`src/gate/`, §3.12.12):
     checkBranchFreshness (fresh/rebase/block via merge-base on real git),
     pure ciGate (required checks green) behind an injectable CiClient, prePrGate.
-    → verify: ☑ stale-base → rebase/block correct on real git; ☑ red/pending/
-    missing checks block, all-green passes. DEPLOY-PENDING: live CI status fetch
-    (GitHub Checks API).
+    → CODE-COMPLETE — Linux runtime-verify pending: ☑ stale-base → rebase/block correct;
+    ☑ red/pending/missing checks block, all-green passes. Live CI status fetch
+    (GitHub Checks API) requires ops/deploy.sh + GITHUB_TOKEN + Linux host.
 **GATE 2 ◑ (integration built & tested, 2026-06-11):** the autonomous coder
 loop is WIRED — `src/orchestrator/coder.ts`: `completeCoderRun` (run succeeded
 → branch-freshness + CI gate → forge secret-scan/push/PR → task coding→review;
@@ -120,8 +119,9 @@ ANY block → coding→needs_human, a NEW state-machine edge added here) +
 recomputeReadiness). The transition API also recomputes readiness on →done.
 Verified on macOS with a scripted agent + injected fakes (forge/CI/pusher) +
 real git: orchestrator branches (review / needs_human / failed) and dependent
-unblock (356 tests). DEPLOY-PENDING: the fully-live "fix typo" run (real
-claude-code spawn + real GitHub push/PR + human merge) on the Linux host.
+unblock (408 tests). CODE-COMPLETE — Linux runtime-verify pending: the fully-live
+"fix typo" run (real claude-code spawn + real GitHub push/PR + human merge)
+requires ops/deploy.sh + GITHUB_TOKEN + Linux host.
 
 ## Phase 3 — Review path (the ping-pong)
 3.1 ☑ Thread service: append-only thread_events with seq + idempotency keys;
@@ -180,7 +180,10 @@ REMAINING for live V1: live planner-agent spawn (Codex/Gemini task-planning CLI 
 5.8 ☐ Transcript browser (events-only); notifier + Telegram channel;
     auth health panel; routines + manual/cron triggers w/ authz
 5.9 ☐ Failure auto-triage (haiku-class classifier → retry/reassign/human)
-5.10 ☐ deploy.sh + systemd (adapt ops/reference) → Linux VM install
+5.10 ◑ deploy.sh + systemd (adapt ops/reference) → Linux VM install
+    → CODE-COMPLETE: ops/deploy.sh (env setup, service install, launch),
+    ops/nightshift.service (systemd unit), ops/egress-apply.sh + ops/egress-teardown.sh
+    (nftables enforcement). Live deployment requires Linux host + GITHUB_TOKEN + test.
 **GATE 5:** factory runs unattended overnight on a trusted repo; morning
 digest shows merged PRs.
 

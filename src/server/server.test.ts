@@ -19,7 +19,7 @@ import { json, matchRoute, routeList, routes, type Route } from "./routes.ts";
 const TOKEN = "test-token-correct";
 const ORIGINAL_TOKEN = process.env.NIGHTSHIFT_API_TOKEN;
 
-let server: Bun.Server<undefined>;
+let server: ReturnType<typeof createServer>;
 
 function get(path: string, token?: string): Promise<Response> {
 	const headers: Record<string, string> =

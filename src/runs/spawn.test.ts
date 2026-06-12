@@ -137,6 +137,31 @@ describe("buildAgentInvocation", () => {
 		expect(result.env.NIGHTSHIFT_PORT).toBe("8787");
 	});
 
+	test("resumeSessionId injects --resume '<id>' into the one-liner; absent otherwise", () => {
+		const homeDir = join(tmp, "home");
+		mkdirSync(homeDir, { recursive: true });
+
+		const withResume = buildAgentInvocation({
+			provider: "claude-code",
+			prompt: "fix the findings",
+			worktreePath: "/tmp/wt",
+			homePath: homeDir,
+			runId: 5,
+			resumeSessionId: "sess-xyz",
+		});
+		expect(withResume.command[2]).toContain("--resume 'sess-xyz'");
+		expect(withResume.command[2]).toContain("exec claude --resume 'sess-xyz' \"$p\"");
+
+		const noResume = buildAgentInvocation({
+			provider: "claude-code",
+			prompt: "fresh start",
+			worktreePath: "/tmp/wt",
+			homePath: homeDir,
+			runId: 6,
+		});
+		expect(noResume.command[2]).not.toContain("--resume");
+	});
+
 	test("unknown provider falls back to using provider name as CLI", () => {
 		const homeDir = join(tmp, "home");
 		mkdirSync(homeDir, { recursive: true });
@@ -162,7 +187,13 @@ describe("spawnRun", () => {
 	let log: EventLog;
 	let projectId: number;
 
+	// spawnRun fails closed when bwrap is absent (macOS build host). These
+	// integration tests exercise the worktree/transition orchestration, not the
+	// sandbox, so opt into the attended-dev escape hatch for the macOS run.
+	const prevEscapeHatch = process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER;
+
 	beforeEach(() => {
+		process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER = "1";
 		handle = openDatabase(":memory:");
 		runMigrations(handle);
 		log = new EventLog(handle);
@@ -172,6 +203,14 @@ describe("spawnRun", () => {
 			.values({ name: "p", repoUrl: "https://example.test/r.git", createdAt: now, updatedAt: now })
 			.returning()
 			.get().id;
+	});
+
+	afterEach(() => {
+		if (prevEscapeHatch === undefined) {
+			delete process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER;
+		} else {
+			process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER = prevEscapeHatch;
+		}
 	});
 
 	function seedTaskAndRun(): { taskId: number; runId: number } {

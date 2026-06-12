@@ -1,0 +1,67 @@
+# systemd unit for Nightshift — Bun/TypeScript AI coding orchestrator.
+#
+# Install:
+#   cp ops/nightshift.service /etc/systemd/system/nightshift.service
+#   systemctl daemon-reload
+#   systemctl enable --now nightshift.service
+#
+# Or let ops/deploy.sh do it for you (idempotent, preferred).
+#
+# Secrets live in /etc/nightshift/env (created by deploy.sh, mode 0600,
+# owned by the service user). The leading "-" means "ignore if absent" — but
+# without NIGHTSHIFT_API_TOKEN the server refuses all protected endpoints
+# (fail-closed), so the file should always be present in production.
+
+[Unit]
+Description=Nightshift — autonomous AI coding orchestrator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nightshift
+Group=nightshift
+WorkingDirectory=/opt/nightshift
+
+# ── runtime environment ──────────────────────────────────────────────────────
+# Bun needs its own install dir on PATH; the service user's ~/.bun/bin is the
+# standard location from the Bun install script.
+Environment=PATH=/home/nightshift/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/nightshift
+# Bun loads .env automatically, but explicit vars here win over .env for
+# the knobs we always want set at the system level.
+Environment=NIGHTSHIFT_DB_PATH=/opt/nightshift/data/nightshift.db
+Environment=NIGHTSHIFT_HOST=127.0.0.1
+Environment=NIGHTSHIFT_PORT=3000
+
+# ── secrets (gitignored; created by deploy.sh) ───────────────────────────────
+# Required keys:
+#   NIGHTSHIFT_API_TOKEN   — Bearer token for all protected API endpoints
+#   GITHUB_TOKEN           — GitHub PAT for forge push + PR (scope: repo)
+#
+# Optional provider auth (set whichever provider(s) you enable):
+#   ANTHROPIC_API_KEY      — claude-code provider (if not using subscription
+#                            auth; claude CLI can also use its own auth store)
+#   OPENAI_API_KEY         — codex provider
+#
+# The leading "-" means systemd silently ignores a missing file; the server
+# itself is fail-closed (503) when NIGHTSHIFT_API_TOKEN is absent.
+EnvironmentFile=-/etc/nightshift/env
+
+# ── process ──────────────────────────────────────────────────────────────────
+ExecStart=/home/nightshift/.bun/bin/bun run /opt/nightshift/src/server/main.ts
+
+# On restart, leave tmux + agent children alive so in-flight tasks survive.
+# A full reboot kills everything; boot-reconcile in the run service picks up
+# the pieces on next startup.
+KillMode=process
+Restart=on-failure
+RestartSec=5
+
+# ── I/O ──────────────────────────────────────────────────────────────────────
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nightshift
+
+[Install]
+WantedBy=multi-user.target

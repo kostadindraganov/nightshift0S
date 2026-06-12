@@ -22,6 +22,9 @@ import type { RunRow } from "../db/schema.ts";
 import { createWorktree } from "../worktree/worktree.ts";
 import { transitionRun } from "./transitions.ts";
 import type { Launcher, LaunchHandle } from "./launcher.ts";
+import { buildBwrapArgs, type SandboxProfile } from "../sandbox/profile.ts";
+import { checkSandboxInvariants } from "../sandbox/invariants.ts";
+import { bwrapAvailable, SandboxDisabledError } from "../sandbox/spawn.ts";
 
 // ---------------------------------------------------------------------------
 // buildAgentInvocation
@@ -42,6 +45,12 @@ export interface BuildAgentInvocationInput {
 	/** Base URL for the hook bridge (sets NIGHTSHIFT_PORT env var). */
 	apiBaseUrl?: string;
 	bearer?: string;
+	/**
+	 * When set, resume an existing provider session instead of starting fresh:
+	 * the one-liner `exec`s the CLI with `--resume '<id>'` (LIVE-WIRING D2).
+	 * Applies to claude and codex alike (the prompt becomes the next turn).
+	 */
+	resumeSessionId?: string;
 }
 
 export interface AgentInvocation {
@@ -68,7 +77,8 @@ function resolveProviderCli(provider: string): string {
  *   the tmux 16 KB paste ceiling is not a concern.
  */
 export function buildAgentInvocation(input: BuildAgentInvocationInput): AgentInvocation {
-	const { provider, prompt, worktreePath, homePath, runId, apiBaseUrl, bearer } = input;
+	const { provider, prompt, worktreePath, homePath, runId, apiBaseUrl, bearer, resumeSessionId } =
+		input;
 	const cli = resolveProviderCli(provider);
 
 	// Write the prompt to a temp file inside homePath.  The file is deleted by
@@ -76,8 +86,15 @@ export function buildAgentInvocation(input: BuildAgentInvocationInput): AgentInv
 	const promptFile = join(homePath, `.ns-prompt-${runId}`);
 	writeFileSync(promptFile, prompt, { encoding: "utf8", mode: 0o600 });
 
+	// `--resume '<id>'` when resuming a captured session id (LIVE-WIRING D2).
+	// Single-quote with the same `'\''` escaping TmuxLauncher uses for tokens.
+	const resumeFlag =
+		resumeSessionId !== undefined
+			? `--resume '${resumeSessionId.replace(/'/g, "'\\''")}' `
+			: "";
+
 	// Shell one-liner: read the file into $p, delete it, exec the CLI with $p.
-	const shellOneLiner = `p=$(cat '${promptFile}'); rm -f '${promptFile}'; exec ${cli} "$p"`;
+	const shellOneLiner = `p=$(cat '${promptFile}'); rm -f '${promptFile}'; exec ${cli} ${resumeFlag}"$p"`;
 
 	const command = ["sh", "-c", shellOneLiner];
 
@@ -110,6 +127,89 @@ export function buildAgentInvocation(input: BuildAgentInvocationInput): AgentInv
 }
 
 // ---------------------------------------------------------------------------
+// Coder sandbox (BLUEPRINT §3.12.22, THREAT-MODEL B1)
+//
+// The interactive coder is the primary, prompt-injectable, arbitrary-shell
+// agent. It MUST run inside the bwrap-lite sandbox — not just the one-shot
+// reviewer/planner. These builders are pure so the wrapped argv is unit-
+// testable on macOS; the fail-closed availability check lives in spawnRun.
+
+/** Provider credential dir under the per-task HOME (ro-bound in the sandbox). */
+function providerAuthDir(homePath: string, provider: string): string {
+	return provider === "codex" ? join(homePath, ".codex") : join(homePath, ".claude");
+}
+
+/**
+ * Pure builder: the SandboxProfile for an interactive coder run — worktree rw,
+ * per-task HOME rw, provider auth dir ro, and the agent's explicit env
+ * allowlist (the same `env` buildAgentInvocation constructed — NEVER the host
+ * GitHub token / SSH agent / process.env).
+ */
+export function buildCoderSandboxProfile(input: {
+	worktreePath: string;
+	homePath: string;
+	provider: string;
+	envAllowlist: Record<string, string>;
+}): SandboxProfile {
+	return {
+		worktreePath: input.worktreePath,
+		taskHome: input.homePath,
+		providerAuthDir: providerAuthDir(input.homePath, input.provider),
+		envAllowlist: input.envAllowlist,
+	};
+}
+
+/**
+ * Pure builder: prepend `bwrap ...buildBwrapArgs(profile) --` to the inner
+ * coder command. The result is what tmux ultimately execs, so the coder runs
+ * inside a private mount/namespace sandbox with no host /home visibility.
+ */
+export function wrapWithBwrap(profile: SandboxProfile, innerCommand: string[]): string[] {
+	return ["bwrap", ...buildBwrapArgs(profile), "--", ...innerCommand];
+}
+
+/**
+ * Fail-closed coder sandbox wrap (mirrors spawnSandboxed):
+ *   - Linux: build the profile, run the invariant checker (any violation →
+ *     SandboxDisabledError), confirm bwrap is on PATH (absent →
+ *     SandboxDisabledError), then return the bwrap-wrapped command.
+ *   - non-Linux: throw SandboxDisabledError UNLESS
+ *     NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER === "1" (attended macOS-dev escape
+ *     hatch, never set by any shipped config/unit), in which case the inner
+ *     command is returned unwrapped.
+ *
+ * Returns the command tmux should launch.
+ */
+async function sandboxCoderCommand(
+	innerCommand: string[],
+	profile: SandboxProfile,
+): Promise<string[]> {
+	if (process.platform !== "linux") {
+		if (process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER === "1") {
+			return innerCommand;
+		}
+		throw new SandboxDisabledError(
+			"unsandboxed coder refused off Linux (set NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER=1 for attended dev only)",
+		);
+	}
+
+	const sandboxArgs = buildBwrapArgs(profile);
+	const violations = checkSandboxInvariants(sandboxArgs, profile);
+	if (violations.length > 0) {
+		const summary = violations.map((v) => `[${v.rule}] ${v.detail}`).join("; ");
+		throw new SandboxDisabledError(`invariant violations: ${summary}`);
+	}
+
+	if (!(await bwrapAvailable())) {
+		throw new SandboxDisabledError(
+			"bwrap not found on PATH (Linux-only; coder spawn fails closed)",
+		);
+	}
+
+	return wrapWithBwrap(profile, innerCommand);
+}
+
+// ---------------------------------------------------------------------------
 // spawnRun
 
 export interface SpawnDeps {
@@ -132,6 +232,8 @@ export interface SpawnRunInput {
 	slug?: string;
 	apiBaseUrl?: string;
 	bearer?: string;
+	/** Passed through to buildAgentInvocation → `--resume '<id>'` (D2). */
+	resumeSessionId?: string;
 }
 
 /**
@@ -147,7 +249,8 @@ export interface SpawnRunInput {
  */
 export async function spawnRun(deps: SpawnDeps, input: SpawnRunInput): Promise<RunRow> {
 	const { handle, log, launcher } = deps;
-	const { taskId, runId, provider, prompt, repoDir, homeRoot, slug, apiBaseUrl, bearer } = input;
+	const { taskId, runId, provider, prompt, repoDir, homeRoot, slug, apiBaseUrl, bearer, resumeSessionId } =
+		input;
 
 	// Step 1: create (or reuse) the git worktree for this task.
 	const wt = await createWorktree({ repoDir, taskId, slug });
@@ -165,7 +268,21 @@ export async function spawnRun(deps: SpawnDeps, input: SpawnRunInput): Promise<R
 		runId,
 		apiBaseUrl,
 		bearer,
+		resumeSessionId,
 	});
+
+	// Step 3b: wrap the coder command in the bwrap sandbox (fail-closed). The
+	// interactive coder is the primary prompt-injectable agent, so it MUST run
+	// inside a private namespace with no host /home visibility (THREAT-MODEL B1).
+	const profile = buildCoderSandboxProfile({
+		worktreePath: wt.path,
+		homePath,
+		provider,
+		envAllowlist: invocation.env,
+	});
+	// Ensure the provider auth dir exists so the bwrap --ro-bind source resolves.
+	mkdirSync(profile.providerAuthDir, { recursive: true });
+	const launchCommand = await sandboxCoderCommand(invocation.command, profile);
 
 	// Step 4: launch via the injected Launcher.
 	const sessionName = `ns-${runId}`;
@@ -174,7 +291,7 @@ export async function spawnRun(deps: SpawnDeps, input: SpawnRunInput): Promise<R
 		handle_ = await launcher.launch({
 			runId,
 			cwd: wt.path,
-			command: invocation.command,
+			command: launchCommand,
 			env: invocation.env,
 			sessionName,
 		});

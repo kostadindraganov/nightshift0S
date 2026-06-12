@@ -2,8 +2,9 @@
  * TaskDetailView — full detail panel for a single task.
  * Loads task + thread + findings; subscribes to the SSE stream and refetches
  * on thread.appended / finding.updated / task.* events for this task.
- * Contains a labelled placeholder where a live PTY terminal would go.
- * Live xterm.js terminal is deploy-pending — Linux runtime only.
+ * For a task with a live (non-terminal) run, the sidebar mounts a read-only
+ * xterm.js terminal attached to that run's tmux pane; otherwise it shows a
+ * labelled placeholder (the empty/disconnected state).
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -13,7 +14,17 @@ import type { Task, ThreadEvent, Finding } from "../lib/types.ts";
 import { ThreadView } from "../components/thread/ThreadView.tsx";
 import { FindingsPanel } from "../components/thread/FindingsPanel.tsx";
 import { VerdictPanel } from "../components/thread/VerdictPanel.tsx";
+import { TerminalView } from "../components/terminal/TerminalView.tsx";
 import type { NightshiftEvent } from "../lib/api.ts";
+
+// Run states with a still-live tmux pane worth attaching to (non-terminal).
+const LIVE_RUN_STATES = new Set(["queued", "starting", "running", "finishing"]);
+
+interface RunSummary {
+  id: number;
+  state: string;
+  tmuxSession: string | null;
+}
 
 interface Props {
   taskId: number;
@@ -31,17 +42,25 @@ export default function TaskDetailView({ taskId, onBack }: Props) {
   const [activePanel, setActivePanel] = useState<Panel>("thread");
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [liveRunId, setLiveRunId] = useState<number | null>(null);
 
   const reload = useCallback(async () => {
     try {
-      const [t, th, fi] = await Promise.all([
+      const [t, th, fi, runs] = await Promise.all([
         api.getTask(taskId),
         api.getThread(taskId),
         api.getFindings(taskId),
+        api.apiFetch<RunSummary[]>(`/runs?task_id=${taskId}`),
       ]);
       setTask(t);
       setEvents(th);
       setFindings(fi);
+      // Newest run first; attach to the latest non-terminal run that has a
+      // live tmux session. Anything else → null (placeholder is shown).
+      const live = [...runs]
+        .sort((a, b) => b.id - a.id)
+        .find((r) => LIVE_RUN_STATES.has(r.state) && r.tmuxSession !== null);
+      setLiveRunId(live ? live.id : null);
       setError(null);
     } catch (e) {
       setError(e instanceof api.ApiError ? e.message : "Failed to load task");
@@ -61,7 +80,8 @@ export default function TaskDetailView({ taskId, onBack }: Props) {
       if (
         e.kind === "thread.appended" ||
         e.kind === "finding.updated" ||
-        e.kind.startsWith("task.")
+        e.kind.startsWith("task.") ||
+        e.kind.startsWith("run.")
       ) {
         void reload();
       }
@@ -369,45 +389,50 @@ export default function TaskDetailView({ taskId, onBack }: Props) {
                 )}
               </div>
 
-              {/* Live terminal placeholder */}
-              <div
-                style={{
-                  background: "var(--color-surface-card)",
-                  border: "1px dashed var(--color-hairline-strong)",
-                  borderRadius: "var(--radius-lg)",
-                  padding: "var(--space-md)",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "var(--space-xs)",
-                  minHeight: 160,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  textAlign: "center",
-                }}
-              >
-                <span style={{ fontSize: 20 }}>⬛</span>
-                <p
+              {/* Live terminal: read-only xterm attach to the run's tmux pane
+                  when a live run exists; otherwise the disconnected placeholder. */}
+              {liveRunId !== null ? (
+                <TerminalView key={liveRunId} runId={liveRunId} />
+              ) : (
+                <div
                   style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: "var(--color-muted)",
-                    fontFamily: "var(--font-sans)",
-                    lineHeight: 1.5,
+                    background: "var(--color-surface-card)",
+                    border: "1px dashed var(--color-hairline-strong)",
+                    borderRadius: "var(--radius-lg)",
+                    padding: "var(--space-md)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "var(--space-xs)",
+                    minHeight: 160,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    textAlign: "center",
                   }}
                 >
-                  Live terminal
-                </p>
-                <p
-                  style={{
-                    fontSize: 11,
-                    color: "var(--color-muted-soft)",
-                    fontFamily: "var(--font-sans)",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  Available on deploy host (Linux runtime)
-                </p>
-              </div>
+                  <span style={{ fontSize: 20 }}>⬛</span>
+                  <p
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "var(--color-muted)",
+                      fontFamily: "var(--font-sans)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Live terminal
+                  </p>
+                  <p
+                    style={{
+                      fontSize: 11,
+                      color: "var(--color-muted-soft)",
+                      fontFamily: "var(--font-sans)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    No live run to attach to
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>

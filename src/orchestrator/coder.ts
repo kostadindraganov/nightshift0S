@@ -27,6 +27,7 @@ import { prePrGate } from "../gate/gate.ts";
 import type { CiClient } from "../gate/ci.ts";
 import type { GitRunner } from "../gate/freshness.ts";
 import { execGit } from "../worktree/git.ts";
+import { assertEgressOrRefuse, egressActive } from "../egress/guard.ts";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -267,17 +268,48 @@ export interface StartCoderTaskInput {
 	prompt: string;
 	repoDir: string;
 	homeRoot: string;
+	/**
+	 * True for any non-human-initiated spawn (scheduler/webhook). When true the
+	 * egress fail-closed gate is enforced before any run row or agent process is
+	 * created (LIVE-WIRING D5, THREAT-MODEL fail-closed requirement #2).
+	 * Defaults to false (human-initiated/attended) for backwards compatibility.
+	 */
+	unattended?: boolean;
+	/**
+	 * Whether the operator has explicitly trusted this repo
+	 * (`config.sandbox.unattendedUntrustedRepos`). Only consulted for unattended
+	 * spawns. Defaults to false (untrusted).
+	 */
+	trustedRepo?: boolean;
 }
 
 /**
  * Convenience wrapper: atomically claims a ready task (ready→coding + run
  * creation) and then spawns the run. Returns {ok:false} if the claim fails.
+ *
+ * EGRESS FAIL-CLOSED (LIVE-WIRING D5): for an unattended spawn on an untrusted
+ * repo, refuse before creating any run/agent unless nftables egress control is
+ * active. `assertEgressOrRefuse` throws `EgressInactiveError` in that case; we
+ * let it propagate so the scheduler/webhook caller sees the refusal.
  */
 export async function startCoderTask(
 	deps: SpawnDeps,
 	input: StartCoderTaskInput,
+	/**
+	 * Injectable probes so the egress gate is testable without nftables. The
+	 * default probe is the real `egressActive()`; tests pass a deterministic one.
+	 */
+	probes: { egressActive: () => Promise<boolean> } = { egressActive },
 ): Promise<{ ok: true; run: RunRow } | { ok: false; reason: string }> {
 	const { handle, log } = deps;
+
+	// Egress gate — checked at the single run-start chokepoint, BEFORE the claim
+	// so no run row or agent process is created when the gate refuses.
+	assertEgressOrRefuse({
+		egressActive: await probes.egressActive(),
+		unattended: input.unattended ?? false,
+		trustedRepo: input.trustedRepo ?? false,
+	});
 
 	// Claim the task and create the run.
 	const claim = await claimTaskAndCreateRun(handle, log, {

@@ -14,7 +14,7 @@
  *       alive → reconcileOrphansAtBoot marks it interrupted.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -36,6 +36,21 @@ import { reapRun, reconcileOrphansAtBoot } from "./reap.ts";
 // Shared test fixtures
 
 let tmp: string;
+
+// spawnRun fails closed when bwrap is absent (macOS build host). This e2e
+// exercises the run pipeline with a FakeLauncher, not the sandbox, so opt into
+// the attended-dev escape hatch for the macOS run.
+const prevEscapeHatch = process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER;
+beforeAll(() => {
+	process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER = "1";
+});
+afterAll(() => {
+	if (prevEscapeHatch === undefined) {
+		delete process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER;
+	} else {
+		process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER = prevEscapeHatch;
+	}
+});
 
 beforeEach(() => {
 	tmp = mkdtempSync(join(tmpdir(), "ns-e2e-"));

@@ -24,6 +24,16 @@ import { threadApi } from "../thread/thread.ts";
 import { runVerdict } from "../review/engine.ts";
 import { codeReviewJudge } from "../review/judge.ts";
 import {
+	makeGetDiff,
+	makeRunReviewer,
+	makeResumeCoder,
+	spawnOneShotCaptured,
+	buildOneShotArgv,
+} from "../runs/liveSpawn.ts";
+import { TmuxLauncher } from "../runs/launcher.ts";
+import type { Planner } from "../planner/bootstrap.ts";
+import { loadConfig } from "../config/config.ts";
+import {
 	addDependency,
 	recomputeReadiness,
 	removeDependency,
@@ -174,46 +184,86 @@ const SSE_HEARTBEAT_MS = 15_000;
 // Review wiring (Phase 3 / GATE 3)
 
 /**
- * Production `ReviewDeps` builder for the review routes. The pure
- * collaborators are wired here: `threadApi` (B1), `runVerdict` (B2 engine),
- * and `codeReviewJudge` (B2). The three side-effecting closures —
- * `getDiff` (git/forge), `runReviewer` (reviewer spawn), `resumeCoder`
- * (coder session resume) — are the §8.1/§8.3 integration step and are NOT
- * wired yet; they throw fail-closed so a review can never silently approve
- * on an unwired host. `runReviewRound` only invokes them for tasks in
- * `state=review`; the thread/findings read routes never touch them.
+ * Production `ReviewDeps` builder for the review routes (LIVE-WIRING D1/D2/D6).
+ * The pure collaborators are wired directly: `threadApi` (B1), `runVerdict`
+ * (B2 engine), and `codeReviewJudge` (B2). The three side-effecting closures
+ * come from `src/runs/liveSpawn.ts`:
+ *
+ *   - `getDiff` — host-side `git diff base..HEAD` of the latest coder worktree.
+ *   - `runReviewer` — a captured-stdout reviewer one-shot (provider =
+ *     `providers.defaultReviewer`), recorded as a `reviewer` run row.
+ *   - `resumeCoder` — resumes the interactive tmux coder via `--resume`.
+ *
+ * FAIL-CLOSED-ON-INVOKE, not at boot: building the closures is side-effect-free
+ * (no spawn, no token, no git, no bwrap). The first real invocation is where a
+ * missing provider binary / missing bwrap / missing coder session / missing
+ * `baseSha` THROWS, so a review can never silently approve on an unwired host.
+ * `runReviewRound` only invokes them for tasks in `state=review`; the
+ * thread/findings read routes never touch them. The server test suite injects
+ * its OWN ReviewDeps via `makeReviewRoutes({ buildDeps })` and does NOT route
+ * through this builder, so these live closures never run under test.
+ *
+ * `resumeCoder` needs a LOCAL repo path (the project stores only a remote
+ * `repoUrl`). The host supplies it via `NIGHTSHIFT_REPO_DIR`; when unset,
+ * `makeResumeCoder` fails closed on invocation (it cannot fabricate a path).
  */
-const buildReviewDeps: ReviewRoutesConfig["buildDeps"] = (ctx): ReviewDeps => ({
-	handle: ctx.handle,
-	log: ctx.events,
-	thread: threadApi,
-	engine: runVerdict,
-	judge: codeReviewJudge,
-	getDiff: () => {
-		throw new Error("review getDiff not wired (integration §8.1)");
-	},
-	runReviewer: () => {
-		throw new Error("review runReviewer not wired (integration §8.1)");
-	},
-	resumeCoder: () => {
-		throw new Error("review resumeCoder not wired (integration §8.1)");
-	},
-	maxRounds: 4,
-});
+const buildReviewDeps: ReviewRoutesConfig["buildDeps"] = (ctx): ReviewDeps => {
+	const cfg = loadConfig();
+	const repoDir = process.env.NIGHTSHIFT_REPO_DIR;
+	return {
+		handle: ctx.handle,
+		log: ctx.events,
+		thread: threadApi,
+		engine: runVerdict,
+		judge: codeReviewJudge,
+		getDiff: makeGetDiff({ handle: ctx.handle, log: ctx.events }),
+		runReviewer: makeRunReviewer({
+			handle: ctx.handle,
+			log: ctx.events,
+			reviewerProvider: cfg.providers.defaultReviewer,
+		}),
+		resumeCoder: makeResumeCoder({
+			handle: ctx.handle,
+			log: ctx.events,
+			launcher: new TmuxLauncher(),
+			...(repoDir ? { repoDir } : {}),
+		}),
+		maxRounds: cfg.review.maxRounds,
+	};
+};
 
 /**
- * Production wiring for the project-bootstrap planner (§4.3). The planner is a
- * ProviderDriver-backed LLM that no host has selected yet — driver selection is
- * the integration step (§8.x), the same place the promote-route planner gets
- * registered. Until then this is fail-closed: it throws rather than fabricate a
- * backlog, so /projects/:id/bootstrap can never silently succeed on an unwired
- * host. `bootstrapProject` itself remains fully exercised by bootstrap.test.ts.
+ * Production wiring for the project-bootstrap planner (§4.3, LIVE-WIRING D1/D6).
+ * The planner is a NON-INTERACTIVE captured-stdout one-shot: `bootstrapProject`
+ * calls `planner.runOnce({ prompt })` and the live adapter delivers that prompt
+ * to the planner provider's CLI (`providers.defaultCoder`) via
+ * `spawnOneShotCaptured` — prompt on stdin, per-task HOME (`homeRoot/planner`),
+ * GitHub token NEVER in env (HOST-SIDE TOKEN INVARIANT §0).
+ *
+ * FAIL-CLOSED-ON-INVOKE: building the adapter is inert. The first `runOnce`
+ * is where an unknown provider (`buildOneShotArgv` throws `OneShotDisabledError`)
+ * or a non-Linux unsandboxed spawn (`OneShotDisabledError`) refuses — so
+ * /projects/:id/bootstrap can never fabricate a backlog on an unwired host.
+ * `bootstrapProject` itself stays fully exercised by bootstrap.test.ts with a
+ * fake planner; the planner route's tests inject their own `buildPlanner`.
  */
-const buildPlanner: PlannerRoutesConfig["buildPlanner"] = () => ({
-	runOnce: () => {
-		throw new Error("planner runOnce not wired (integration §8.x)");
-	},
-});
+const buildPlanner: PlannerRoutesConfig["buildPlanner"] = (): Planner => {
+	const cfg = loadConfig();
+	const provider = cfg.providers.defaultCoder;
+	const home = `${cfg.sandbox.homeRoot}/planner`;
+	return {
+		runOnce: async ({ prompt }) => {
+			const { stdout } = await spawnOneShotCaptured({
+				argv: buildOneShotArgv(provider),
+				prompt,
+				cwd: home,
+				home,
+				providerAuthDir: provider === "codex" ? `${home}/.codex` : `${home}/.claude`,
+			});
+			return { stdout };
+		},
+	};
+};
 
 // ---------------------------------------------------------------------------
 // The table

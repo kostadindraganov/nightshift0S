@@ -234,3 +234,180 @@ vendor/sandcastle/  вграден workspace
 | `/readyz` връща `503 not_ready`           | Миграциите не са приложени — пусни `bun run db:migrate`.               |
 | `bun: command not found`                  | Bun не е инсталиран / не е в PATH — виж секция 2.                       |
 | Сървърът reset-ва SSE връзката            | Зад reverse proxy с idle timeout < 60s — вдигни го (heartbeat е 15s).  |
+
+---
+
+## 10. Linux deploy (production)
+
+### 10.1 Изисквания
+
+| Компонент | Версия |
+|-----------|--------|
+| Linux     | Debian 12 / Ubuntu 22.04+ (или еквивалент systemd) |
+| git       | ≥ 2.38 |
+| curl      | за Bun install script |
+| systemd   | вграден — deploy.sh управлява unit-а |
+| tmux      | за агентски сесии (инсталирай с `apt install tmux`) |
+
+Bun-ът се инсталира автоматично от deploy.sh за service user-а — **не е нужно предварително**.
+
+### 10.2 Задължителни env vars (secrets)
+
+Задай ги **преди** `ops/deploy.sh`. Никога не ги commit-вай.
+
+| Променлива             | Предназначение                                                         |
+|------------------------|------------------------------------------------------------------------|
+| `NIGHTSHIFT_API_TOKEN` | Bearer токен за всички защитени API endpoints. Генерирай с `openssl rand -hex 32`. |
+| `GITHUB_TOKEN`         | GitHub PAT с scope `repo` — за forge push + отваряне на PR.           |
+
+Опционални provider keys (задай ако използваш):
+
+| Променлива             | Предназначение                                                         |
+|------------------------|------------------------------------------------------------------------|
+| `ANTHROPIC_API_KEY`    | claude-code provider чрез API auth (може и subscription auth).        |
+| `OPENAI_API_KEY`       | codex provider.                                                        |
+
+### 10.3 Deploy стъпки
+
+```sh
+# 1. Клонирай репото на сървъра (или git pull за ъпдейт)
+git clone https://github.com/your-org/nightshift.git /opt/nightshift
+cd /opt/nightshift
+
+# 2. Стартирай deploy.sh като root (или sudo).
+#    Скриптът е идемпотентен — безопасно е да го пуснеш повторно.
+sudo \
+  NIGHTSHIFT_API_TOKEN="$(openssl rand -hex 32)" \
+  GITHUB_TOKEN="ghp_yourtoken" \
+  bash ops/deploy.sh
+```
+
+deploy.sh прави по ред:
+
+1. Създава `nightshift` service user (ако не съществува).
+2. Настройва ownership на `/opt/nightshift` и `/opt/nightshift/data/`.
+3. Инсталира Bun за service user-а (`~/.bun/bin/bun`).
+4. `bun install --frozen-lockfile` + `bun run db:migrate`.
+5. Записва secrets в `/etc/nightshift/env` (mode 640, root:nightshift).
+6. Инсталира и (ре)стартира `nightshift.service` unit.
+7. Прави health check към `/healthz` (до 15s).
+
+### 10.4 Управление на service-а
+
+```sh
+# статус
+systemctl status nightshift.service
+
+# логове (live)
+journalctl -u nightshift.service -f
+
+# рестарт (напр. след ръчна промяна на секрети)
+systemctl restart nightshift.service
+
+# спиране
+systemctl stop nightshift.service
+```
+
+### 10.5 Актуализация (git pull + redeploy)
+
+```sh
+cd /opt/nightshift
+git pull --ff-only
+
+# Подай същите secrets като при първоначалния deploy.
+sudo \
+  NIGHTSHIFT_API_TOKEN="$(cat /etc/nightshift/env | grep NIGHTSHIFT_API_TOKEN | cut -d= -f2)" \
+  GITHUB_TOKEN="$(cat /etc/nightshift/env | grep GITHUB_TOKEN | cut -d= -f2)" \
+  bash ops/deploy.sh
+```
+
+Скриптът е идемпотентен: повторното изпълнение е безопасно — ъпдейтва зависимостите, прилага нови миграции, и рестартира service-а.
+
+### 10.6 Активиране на egress контрол (nftables)
+
+Egress контролът е **задължителен** за `unattended_untrusted_repos=true`. Без него системата отказва да стартира unattended runs на untrusted repos (fail-closed guard в `src/egress/guard.ts`).
+
+Използвай `ops/egress-apply.sh` (изисква root, Linux):
+
+```sh
+# Вземи UID на service user-а
+SERVICE_UID=$(id -u nightshift)
+
+# Приложи nftables ruleset (default-DROP + provider/GitHub allowlist)
+sudo NIGHTSHIFT_EGRESS_UID=$SERVICE_UID bash /opt/nightshift/ops/egress-apply.sh
+
+# Провери (трябва да видиш nightshift_egress_uidXXXX table)
+sudo nft list tables
+```
+
+За допълнителни хостове (напр. self-hosted GitHub):
+
+```sh
+sudo NIGHTSHIFT_EGRESS_UID=$SERVICE_UID \
+     NIGHTSHIFT_EGRESS_HOSTS="git.example.com" \
+     bash /opt/nightshift/ops/egress-apply.sh
+```
+
+Teardown (деактивирай egress контрол):
+
+```sh
+sudo NIGHTSHIFT_EGRESS_UID=$SERVICE_UID bash /opt/nightshift/ops/egress-teardown.sh
+```
+
+След активиране задай в `nightshift.config.json`:
+
+```json
+{
+  "sandbox": {
+    "egressAllowlist": [
+      "api.anthropic.com",
+      "api.openai.com",
+      "api.github.com",
+      "github.com"
+    ],
+    "unattendedUntrustedRepos": true
+  }
+}
+```
+
+### 10.7 Активиране на bwrap sandbox
+
+`bwrap` (bubblewrap) осигурява namespace isolation за агентските процеси. На Linux инсталирай с:
+
+```sh
+sudo apt install bubblewrap
+```
+
+Провери:
+
+```sh
+which bwrap && bwrap --version
+```
+
+Ако `bwrap` е наличен на PATH при стартиране на run, `src/sandbox/spawn.ts` го активира автоматично. Ако **не е** наличен, системата работи без него (предупреждение в лога), но namespace isolation е изключен — приемливо за доверени repos, **не** за untrusted.
+
+### 10.8 Reverse proxy (nginx пример)
+
+Сървърът слуша на `127.0.0.1:3000` по подразбиране. Изложи го чрез nginx:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name nightshift.example.com;
+
+    # SSE изисква дълъг idle timeout (heartbeat е 15s, вдигни над 60s)
+    proxy_read_timeout 120s;
+    proxy_send_timeout 120s;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        # За SSE: изключи буферирането
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_set_header Connection '';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```

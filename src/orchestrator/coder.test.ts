@@ -36,9 +36,12 @@ import type { GitRunner } from "../gate/freshness.ts";
 import {
 	completeCoderRun,
 	confirmMergeAndUnblock,
+	startCoderTask,
 	type CoderOrchestratorDeps,
 	type RepoConfig,
 } from "./coder.ts";
+import { FakeLauncher } from "../runs/launcher.ts";
+import { EgressInactiveError } from "../egress/guard.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers — git repo setup
@@ -707,5 +710,53 @@ describe("completeCoderRun edge cases", () => {
 		// Task must NOT have been mutated.
 		const task = getTask(handle, taskId);
 		expect(task?.state).toBe("coding");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// startCoderTask — egress fail-closed gate (LIVE-WIRING D5, fail-closed req #2)
+// ---------------------------------------------------------------------------
+
+describe("startCoderTask egress gate", () => {
+	test("unattended + untrusted + egress inactive → refused before any run is created", async () => {
+		const now = new Date().toISOString();
+		const taskId = handle.db
+			.insert(tasks)
+			.values({
+				projectId,
+				title: "scheduler task",
+				state: "ready",
+				priority: 0,
+				createdAt: now,
+				updatedAt: now,
+			})
+			.returning()
+			.get().id;
+
+		const launcher = new FakeLauncher();
+
+		await expect(
+			startCoderTask(
+				{ handle, log, launcher },
+				{
+					taskId,
+					provider: "claude-code",
+					model: "cli-default",
+					authLane: "subscription",
+					prompt: "do the work",
+					repoDir,
+					homeRoot: repoDir,
+					unattended: true,
+					trustedRepo: false,
+				},
+				// Deterministic probe: egress NOT active (platform-independent).
+				{ egressActive: async () => false },
+			),
+		).rejects.toBeInstanceOf(EgressInactiveError);
+
+		// No run row was created and the task was NOT claimed (still ready).
+		const runCount = handle.db.select().from(runs).all().length;
+		expect(runCount).toBe(0);
+		expect(getTask(handle, taskId)?.state).toBe("ready");
 	});
 });

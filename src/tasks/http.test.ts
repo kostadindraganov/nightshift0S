@@ -16,7 +16,7 @@ import { createServer } from "../server/main.ts";
 const TOKEN = "test-token-http";
 const ORIGINAL_TOKEN = process.env.NIGHTSHIFT_API_TOKEN;
 
-let server: Bun.Server<undefined>;
+let server: ReturnType<typeof createServer>;
 
 beforeEach(() => {
 	process.env.NIGHTSHIFT_API_TOKEN = TOKEN;
