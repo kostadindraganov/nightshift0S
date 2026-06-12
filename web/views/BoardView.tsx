@@ -10,6 +10,10 @@ import {
 import type { Project } from "../lib/types.ts";
 import { KanbanBoard } from "../components/kanban/KanbanBoard.tsx";
 
+interface BoardViewProps {
+  onOpenTask?: (id: number) => void;
+}
+
 type ViewState =
   | { kind: "loading" }
   | { kind: "empty" }
@@ -17,7 +21,7 @@ type ViewState =
   | { kind: "error"; message: string }
   | { kind: "ready"; project: Project };
 
-export default function BoardView() {
+export default function BoardView({ onOpenTask }: BoardViewProps) {
   const [state, setState] = useState<ViewState>({ kind: "loading" });
 
   useEffect(() => {
@@ -209,7 +213,7 @@ export default function BoardView() {
 
       {/* Kanban board takes remaining height */}
       <div style={{ height: "calc(100% - 49px)", overflow: "hidden" }}>
-        <KanbanBoard projectId={state.project.id} />
+        <KanbanBoard projectId={state.project.id} onOpenTask={onOpenTask} />
       </div>
     </div>
   );

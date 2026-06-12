@@ -8,6 +8,7 @@ import { useEventStream } from "../lib/useEventStream.ts";
 import AppShell from "./AppShell.tsx";
 import BoardView from "../views/BoardView.tsx";
 import SettingsView from "../views/SettingsView.tsx";
+import TaskDetailView from "../views/TaskDetailView.tsx";
 
 // ── Token gate ────────────────────────────────────────────────
 function TokenGate() {
@@ -59,6 +60,7 @@ function TokenGate() {
 // ── App ───────────────────────────────────────────────────────
 export default function App() {
   const [view, setView] = useState<"board" | "settings">("board");
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
 
   // Subscribe to the event stream at the top level purely to drive the
   // connection indicator in AppShell.  Views may subscribe independently.
@@ -70,9 +72,25 @@ export default function App() {
     return <TokenGate />;
   }
 
+  // Task detail view overlays the current view when a task is selected.
+  if (selectedTaskId !== null) {
+    return (
+      <AppShell view={view} onNavigate={setView} connected={connected}>
+        <TaskDetailView
+          taskId={selectedTaskId}
+          onBack={() => setSelectedTaskId(null)}
+        />
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell view={view} onNavigate={setView} connected={connected}>
-      {view === "board" ? <BoardView /> : <SettingsView />}
+      {view === "board" ? (
+        <BoardView onOpenTask={setSelectedTaskId} />
+      ) : (
+        <SettingsView />
+      )}
     </AppShell>
   );
 }

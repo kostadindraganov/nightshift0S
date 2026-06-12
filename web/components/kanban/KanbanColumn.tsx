@@ -11,9 +11,10 @@ interface Props {
   col: ColumnDef;
   tasks: Task[];
   isOver?: boolean;
+  onOpenTask?: (id: number) => void;
 }
 
-export function KanbanColumn({ col, tasks }: Props) {
+export function KanbanColumn({ col, tasks, onOpenTask }: Props) {
   const { setNodeRef, isOver } = useDroppable({ id: col.id });
   const ids = tasks.map((t) => t.id);
 
@@ -84,7 +85,7 @@ export function KanbanColumn({ col, tasks }: Props) {
       >
         <SortableContext items={ids} strategy={verticalListSortingStrategy}>
           {tasks.map((task) => (
-            <SortableTaskCard key={task.id} task={task} />
+            <SortableTaskCard key={task.id} task={task} onOpenTask={onOpenTask} />
           ))}
         </SortableContext>
 

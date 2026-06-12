@@ -7,9 +7,10 @@ import { TaskCard } from "./TaskCard.tsx";
 
 interface Props {
   task: Task;
+  onOpenTask?: (id: number) => void;
 }
 
-export function SortableTaskCard({ task }: Props) {
+export function SortableTaskCard({ task, onOpenTask }: Props) {
   const {
     attributes,
     listeners,
@@ -34,7 +35,7 @@ export function SortableTaskCard({ task }: Props) {
       {...attributes}
       {...listeners}
     >
-      <TaskCard task={task} isDragging={isDragging} />
+      <TaskCard task={task} isDragging={isDragging} onOpenTask={onOpenTask} />
     </div>
   );
 }

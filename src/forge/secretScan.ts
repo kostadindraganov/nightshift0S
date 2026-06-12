@@ -26,7 +26,7 @@ function mask(value: string): string {
 // Rules
 // ---------------------------------------------------------------------------
 
-interface Rule {
+export interface SecretRule {
   name: string;
   /** Pattern to test the added-line content. */
   pattern: RegExp;
@@ -34,7 +34,12 @@ interface Rule {
   extract?: (match: RegExpMatchArray) => string;
 }
 
-const RULES: Rule[] = [
+/**
+ * The canonical secret rule set, exported so other modules (thread redaction,
+ * §3.2) can reuse the exact same patterns. Do NOT change any pattern here —
+ * scanDiff/hasBlockingSecrets behaviour is locked by secretScan.test.ts.
+ */
+export const SECRET_RULES: readonly SecretRule[] = [
   // GitHub classic PATs (ghp_ / gho_ / ghu_ / ghs_ / ghr_ + ~36 base62)
   // Real tokens are AKIA+36 chars; use 35+ to handle slight variations in test tokens.
   {
@@ -171,7 +176,7 @@ export function scanDiff(diff: string): SecretFinding[] {
 
       const content = rawLine.slice(1); // Strip the leading "+"
 
-      for (const rule of RULES) {
+      for (const rule of SECRET_RULES) {
         const m = content.match(rule.pattern);
         if (!m) continue;
 

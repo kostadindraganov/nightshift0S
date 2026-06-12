@@ -1,7 +1,7 @@
 // HTTP client for the Nightshift API.
 // All requests are same-origin; the server is expected to serve both the SPA
 // and the API.  Request bodies use snake_case; responses are camelCase.
-import type { Task, Project, NightshiftEvent, ConfigEntry } from "./types.ts";
+import type { Task, Project, NightshiftEvent, ConfigEntry, ThreadEvent, Finding } from "./types.ts";
 
 // ── Token helpers ────────────────────────────────────────────
 const TOKEN_KEY = "nightshift_token";
@@ -140,3 +140,53 @@ export function getConfig(): Promise<ConfigEntry[]> {
 }
 
 export { type NightshiftEvent };
+
+export function getThread(taskId: number): Promise<ThreadEvent[]> {
+  return apiFetch<ThreadEvent[]>(`/tasks/${taskId}/thread`);
+}
+
+export function getFindings(taskId: number, round?: number): Promise<Finding[]> {
+  const qs = round !== undefined ? `?round=${round}` : "";
+  return apiFetch<Finding[]>(`/tasks/${taskId}/findings${qs}`);
+}
+
+export function triggerReviewRound(
+  taskId: number,
+): Promise<{ ok: boolean; outcome?: string; round?: number }> {
+  return apiFetch<{ ok: boolean; outcome?: string; round?: number }>(
+    `/tasks/${taskId}/review-round`,
+    { method: "POST" },
+  );
+}
+
+export function postVerdict(
+  taskId: number,
+  body: { decision: "resume_coding" | "force_merge" | "reject"; actor?: string },
+): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/tasks/${taskId}/verdict`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Promote a draft task to backlog, optionally expanding it with the planner. */
+export function promoteDraft(
+  taskId: number,
+  body: { actor?: string; expand?: boolean },
+): Promise<{ task: Task; expanded: boolean }> {
+  return apiFetch<{ task: Task; expanded: boolean }>(`/tasks/${taskId}/promote`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Bulk-create draft tasks from a markdown bullet list. */
+export function importDraftTasks(body: {
+  project_id: number;
+  markdown: string;
+}): Promise<Task[]> {
+  return apiFetch<Task[]>("/tasks/import-drafts", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}

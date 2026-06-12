@@ -6,6 +6,7 @@ import { StateBadge } from "./stateBadge.tsx";
 interface TaskCardProps {
   task: Task;
   isDragging?: boolean;
+  onOpenTask?: (id: number) => void;
 }
 
 function riskColor(tier: string): string {
@@ -19,7 +20,7 @@ function riskColor(tier: string): string {
   }
 }
 
-export function TaskCard({ task, isDragging = false }: TaskCardProps) {
+export function TaskCard({ task, isDragging = false, onOpenTask }: TaskCardProps) {
   return (
     <div
       style={{
@@ -38,6 +39,14 @@ export function TaskCard({ task, isDragging = false }: TaskCardProps) {
         userSelect: "none",
       }}
       className="task-card"
+      onClick={(e) => {
+        // Only fire if NOT a drag gesture (distance constraint handles it at
+        // the DnD layer; we guard here too so a tap → open detail).
+        if (!isDragging && onOpenTask) {
+          e.stopPropagation();
+          onOpenTask(task.id);
+        }
+      }}
     >
       {/* Title */}
       <div

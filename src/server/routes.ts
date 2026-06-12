@@ -17,6 +17,12 @@ import type { TaskState } from "../db/columns.ts";
 import type { EventLog } from "../events/events.ts";
 import { configRoutes } from "../config/settingsRoutes.ts";
 import { runRoutes } from "../runs/runRoutes.ts";
+import { makeReviewRoutes, type ReviewRoutesConfig } from "./reviewRoutes.ts";
+import { makePlannerRoutes, type PlannerRoutesConfig } from "./plannerRoutes.ts";
+import type { ReviewDeps } from "../orchestrator/review.ts";
+import { threadApi } from "../thread/thread.ts";
+import { runVerdict } from "../review/engine.ts";
+import { codeReviewJudge } from "../review/judge.ts";
 import {
 	addDependency,
 	recomputeReadiness,
@@ -34,6 +40,7 @@ import {
 	updateTask,
 	ValidationError,
 } from "../tasks/tasks.ts";
+import { promoteDraft, importMarkdownDrafts } from "../tasks/draftLane.ts";
 
 export interface RouteContext {
 	req: Request;
@@ -162,6 +169,51 @@ function parseIntParam(raw: string | undefined, name: string): number {
 
 /** SSE heartbeat interval — a comment line keeps proxies/clients from timing out. */
 const SSE_HEARTBEAT_MS = 15_000;
+
+// ---------------------------------------------------------------------------
+// Review wiring (Phase 3 / GATE 3)
+
+/**
+ * Production `ReviewDeps` builder for the review routes. The pure
+ * collaborators are wired here: `threadApi` (B1), `runVerdict` (B2 engine),
+ * and `codeReviewJudge` (B2). The three side-effecting closures —
+ * `getDiff` (git/forge), `runReviewer` (reviewer spawn), `resumeCoder`
+ * (coder session resume) — are the §8.1/§8.3 integration step and are NOT
+ * wired yet; they throw fail-closed so a review can never silently approve
+ * on an unwired host. `runReviewRound` only invokes them for tasks in
+ * `state=review`; the thread/findings read routes never touch them.
+ */
+const buildReviewDeps: ReviewRoutesConfig["buildDeps"] = (ctx): ReviewDeps => ({
+	handle: ctx.handle,
+	log: ctx.events,
+	thread: threadApi,
+	engine: runVerdict,
+	judge: codeReviewJudge,
+	getDiff: () => {
+		throw new Error("review getDiff not wired (integration §8.1)");
+	},
+	runReviewer: () => {
+		throw new Error("review runReviewer not wired (integration §8.1)");
+	},
+	resumeCoder: () => {
+		throw new Error("review resumeCoder not wired (integration §8.1)");
+	},
+	maxRounds: 4,
+});
+
+/**
+ * Production wiring for the project-bootstrap planner (§4.3). The planner is a
+ * ProviderDriver-backed LLM that no host has selected yet — driver selection is
+ * the integration step (§8.x), the same place the promote-route planner gets
+ * registered. Until then this is fail-closed: it throws rather than fabricate a
+ * backlog, so /projects/:id/bootstrap can never silently succeed on an unwired
+ * host. `bootstrapProject` itself remains fully exercised by bootstrap.test.ts.
+ */
+const buildPlanner: PlannerRoutesConfig["buildPlanner"] = () => ({
+	runOnce: () => {
+		throw new Error("planner runOnce not wired (integration §8.x)");
+	},
+});
 
 // ---------------------------------------------------------------------------
 // The table
@@ -373,6 +425,61 @@ export const routes: Route[] = [
 				return json({ task: result.task, from: result.from });
 		},
 	},
+	// -- draft lane (§3.10 item 2) ------------------------------------------------
+	{
+		method: "POST",
+		path: "/tasks/:id/promote",
+		auth: true,
+		summary: "Promote a draft task to backlog, optionally expanding it with the planner: {actor?, expand?}",
+		handler: async (ctx) => {
+			const id = parseIntParam(ctx.params.id, "task id");
+			const body = await readBody(ctx.req);
+			const actor =
+				typeof body.actor === "string" && body.actor.length > 0 ? body.actor : "api";
+			// expand=true wires the planner; no planner is registered server-side yet
+			// (integration §8.x) so we pass deps.planner=undefined and it no-ops.
+			// When the planner ships, wire it here.
+			const result = await promoteDraft(
+				{ handle: ctx.handle, log: ctx.events },
+				id,
+				actor,
+			);
+			if (!result.ok) {
+				if (result.reason === "not_found") {
+					return jsonError(404, "not_found", result.message);
+				}
+				if (result.reason === "not_draft") {
+					return jsonError(409, "not_draft", result.message);
+				}
+				if (result.reason === "lost_race") {
+					return jsonError(409, "lost_race", result.message);
+				}
+				return jsonError(500, "planner_error", result.message);
+			}
+			return json({ task: result.task, expanded: result.expanded });
+		},
+	},
+	{
+		method: "POST",
+		path: "/tasks/import-drafts",
+		auth: true,
+		summary: "Bulk-create draft tasks from a markdown bullet list: {project_id, markdown}",
+		handler: async (ctx) => {
+			const body = await readBody(ctx.req);
+			if (typeof body.project_id !== "number") {
+				throw new ValidationError("project_id must be an integer");
+			}
+			if (typeof body.markdown !== "string") {
+				throw new ValidationError("markdown must be a string");
+			}
+			const rows = await importMarkdownDrafts(
+				{ handle: ctx.handle },
+				body.project_id,
+				body.markdown,
+			);
+			return json(rows, 201);
+		},
+	},
 	// -- dependencies ----------------------------------------------------------
 	{
 		method: "POST",
@@ -464,6 +571,10 @@ export const routes: Route[] = [
 	...configRoutes,
 	// -- runs ------------------------------------------------------------------
 	...runRoutes,
+	// -- review (thread / findings / review-round / verdict) -------------------
+	...makeReviewRoutes({ buildDeps: buildReviewDeps }),
+	// -- planner (project bootstrap) -------------------------------------------
+	...makePlannerRoutes({ buildPlanner }),
 ];
 
 /** Openapi-ish description generated FROM the table — never hand-written. */

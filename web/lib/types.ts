@@ -72,3 +72,41 @@ export interface ConfigEntry {
   secret: boolean;
   scope: string;
 }
+
+export interface ThreadEvent {
+  id: number;
+  taskId: number;
+  seq: number;
+  kind: "message" | "finding" | "rebuttal" | "verdict" | "system" | "human" | "artifact";
+  actor: string;
+  round: number;
+  runId: number | null;
+  idempotencyKey: string | null;
+  payloadJson: string;
+  artifactRefs: string | null;
+  redacted: boolean;
+  createdAt: string;
+}
+
+export interface Finding {
+  id: number;
+  taskId: number;
+  round: number;
+  runId: number | null;
+  severity: "critical" | "high" | "medium" | "low" | "nit";
+  confidence: number;
+  commitSha: string;
+  filePathOld: string | null;
+  filePathNew: string | null;
+  hunkContext: string | null;
+  description: string;
+  suggestion: string | null;
+  resolutionState: "open" | "fixed" | "rebutted" | "withdrawn" | "accepted_risk";
+  resolvedRound: number | null;
+}
+
+export interface Verdict {
+  verdict: "approved" | "revise";
+  summary: string;
+  findings: unknown[]; // payload-embedded; render from Finding rows instead
+}

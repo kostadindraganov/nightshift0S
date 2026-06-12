@@ -4,8 +4,9 @@ import type { Task, TaskState } from "../../lib/types.ts";
 
 export type { Task, TaskState };
 
-// The 7 visual columns and which TaskStates they contain.
+// The 8 visual columns and which TaskStates they contain.
 export type ColumnId =
+  | "draft"
   | "backlog"
   | "ready"
   | "coding"
@@ -27,9 +28,17 @@ export interface ColumnDef {
 
 export const COLUMNS: ColumnDef[] = [
   {
+    id: "draft",
+    label: "To-Do",
+    states: ["draft"],
+    targetState: null,
+    dropBlocked: true,
+    dropBlockReason: "drop draft here via Promote button",
+  },
+  {
     id: "backlog",
     label: "Backlog",
-    states: ["draft", "backlog"],
+    states: ["backlog"],
     targetState: "backlog",
     dropBlocked: false,
   },
@@ -81,7 +90,7 @@ export const COLUMNS: ColumnDef[] = [
 
 // Map each TaskState -> ColumnId for O(1) lookup.
 export const STATE_TO_COLUMN: Record<TaskState, ColumnId> = {
-  draft: "backlog",
+  draft: "draft",
   backlog: "backlog",
   ready: "ready",
   coding: "coding",

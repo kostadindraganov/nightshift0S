@@ -27,6 +27,7 @@ import {
   type ColumnId,
 } from "./types.ts";
 import { KanbanColumn } from "./KanbanColumn.tsx";
+import { DraftColumn } from "./DraftColumn.tsx";
 import { TaskCard } from "./TaskCard.tsx";
 import { Toast } from "./Toast.tsx";
 import { useEventStream } from "../../lib/useEventStream.ts";
@@ -35,6 +36,7 @@ import type { NightshiftEvent } from "../../lib/api.ts";
 
 interface Props {
   projectId: number;
+  onOpenTask?: (id: number) => void;
 }
 
 type LoadState =
@@ -101,7 +103,7 @@ function liveIndicator(connected: boolean) {
   );
 }
 
-export function KanbanBoard({ projectId }: Props) {
+export function KanbanBoard({ projectId, onOpenTask }: Props) {
   const [loadState, setLoadState] = useState<LoadState>({ kind: "loading" });
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
@@ -410,9 +412,20 @@ export function KanbanBoard({ projectId }: Props) {
             alignItems: "flex-start",
           }}
         >
-          {COLUMNS.map((col) => (
-            <KanbanColumn key={col.id} col={col} tasks={grouped[col.id] ?? []} />
-          ))}
+          {COLUMNS.map((col) =>
+            col.id === "draft" ? (
+              <DraftColumn
+                key={col.id}
+                col={col}
+                tasks={grouped[col.id] ?? []}
+                onTaskPromoted={() => void loadTasks()}
+                onToast={setToastMsg}
+                onOpenTask={onOpenTask}
+              />
+            ) : (
+              <KanbanColumn key={col.id} col={col} tasks={grouped[col.id] ?? []} onOpenTask={onOpenTask} />
+            )
+          )}
         </div>
 
         <DragOverlay dropAnimation={null}>
