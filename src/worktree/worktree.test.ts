@@ -74,8 +74,8 @@ describe("(a) createWorktree: basic creation", () => {
       slug: "my task",
     });
 
-    // Branch follows ns/<id>-<slug>-<rand6> pattern
-    expect(result.branch).toMatch(/^ns\/1-my-task-[0-9a-f]{6}$/);
+    // Branch follows ns/<id>-<slug>-<rand16> pattern
+    expect(result.branch).toMatch(/^ns\/1-my-task-[0-9a-f]{16}$/);
     expect(result.reused).toBe(false);
 
     // Directory must exist
@@ -193,7 +193,7 @@ describe("(d) generateBranchName: crypto-random uniqueness", () => {
 
   test("branch name matches expected pattern", () => {
     const name = generateBranchName({ taskId: 7, slug: "hello world" });
-    expect(name).toMatch(/^ns\/7-hello-world-[0-9a-f]{6}$/);
+    expect(name).toMatch(/^ns\/7-hello-world-[0-9a-f]{16}$/);
   });
 });
 

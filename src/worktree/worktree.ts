@@ -87,7 +87,9 @@ export function generateBranchName(opts?: {
   taskId?: number;
   slug?: string;
 }): string {
-  const suffix = randomBytes(3).toString("hex");
+  // 8 bytes = 64 bits of entropy (16 hex chars): collision-free in practice
+  // even across thousands of branches created in the same wall-clock second.
+  const suffix = randomBytes(8).toString("hex");
   const parts: string[] = [];
   if (opts?.taskId !== undefined) parts.push(String(opts.taskId));
   if (opts?.slug) parts.push(sanitizeName(opts.slug));

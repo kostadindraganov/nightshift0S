@@ -174,6 +174,11 @@ test("transition endpoint: happy path and illegal path", async () => {
 		"illegal_transition",
 	);
 
+	// Regression: →done from an illegal from-state is 409 illegal_transition,
+	// not a 400 "merge_sha required" (the guard must check legality first).
+	const illegalDone = await call("POST", `/tasks/${task.id}/transition`, { to: "done" });
+	expect(illegalDone.status).toBe(409);
+
 	// backlog → ready is legal but system-driven → 400.
 	const systemOnly = await call("POST", `/tasks/${task.id}/transition`, { to: "ready" });
 	expect(systemOnly.status).toBe(400);

@@ -133,14 +133,23 @@ export function transitionTask(
 	if (expectedFrom !== undefined && !TASK_STATES.includes(expectedFrom)) {
 		throw new ValidationError(`Invalid expected_from state '${String(expectedFrom)}'`);
 	}
-	// Invariant 3, direction "done requires merge_sha": caller bug, not a race.
-	if (to === "done" && (typeof extra?.mergeSha !== "string" || extra.mergeSha.length === 0)) {
-		throw new ValidationError("Transition to 'done' requires a non-empty merge_sha");
-	}
+	// Invariant 3 ("done requires merge_sha") is a 400-class caller bug — but it
+	// must be checked AFTER legality, never before: an illegal edge to 'done'
+	// (e.g. draft→done) is a 409 illegal_transition, not a 400 missing-field.
+	const requireMergeSha = (): void => {
+		if (to === "done" && (typeof extra?.mergeSha !== "string" || extra.mergeSha.length === 0)) {
+			throw new ValidationError("Transition to 'done' requires a non-empty merge_sha");
+		}
+	};
+
 	// Illegal pairs are rejected before any DB work when the caller pinned the
 	// from-state; the unpinned path checks inside the link after reading state.
-	if (expectedFrom !== undefined && !isLegalTransition(expectedFrom, to)) {
-		return Promise.resolve({ ok: false, reason: "illegal" });
+	if (expectedFrom !== undefined) {
+		if (!isLegalTransition(expectedFrom, to)) {
+			return Promise.resolve({ ok: false, reason: "illegal" });
+		}
+		// Edge is legal — now a missing merge_sha is a genuine 400.
+		requireMergeSha();
 	}
 
 	return enqueueWrite((): TransitionResult => {
@@ -150,6 +159,11 @@ export function transitionTask(
 		const from = expectedFrom ?? current.state;
 		const edge = findTransition(from, to);
 		if (!edge) return { ok: false, reason: "illegal" };
+
+		// Unpinned path: the edge's legality is only known here (after reading
+		// current state). Enforce merge_sha now — after a confirmed-legal edge,
+		// never before. (The pinned path already checked it above.)
+		if (expectedFrom === undefined) requireMergeSha();
 
 		const patch: Partial<typeof tasks.$inferInsert> = {
 			state: to,

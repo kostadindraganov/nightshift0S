@@ -191,13 +191,29 @@ test("claim sets claimed_by; partial unique index one_active_run_per_task holds"
 
 test("transition to done without merge_sha is a ValidationError (invariant 3)", async () => {
 	const taskId = seedTask("merging");
-	// The guard throws synchronously — before any DB work is even enqueued.
-	expect(() => transitionTask(handle, log, { taskId, to: "done", actor: "test" })).toThrow(
-		ValidationError,
-	);
+	// merging→done is a LEGAL edge, so a missing merge_sha is a 400-class caller
+	// bug. The guard now fires AFTER legality — inside the writer link on the
+	// unpinned path — so it surfaces as a rejected promise, not a sync throw.
+	await expect(
+		transitionTask(handle, log, { taskId, to: "done", actor: "test" }),
+	).rejects.toThrow(ValidationError);
 	// Nothing moved, nothing emitted.
 	const row = handle.db.select().from(tasks).where(eq(tasks.id, taskId)).get()!;
 	expect(row.state).toBe("merging");
+	expect(stateChangeEvents(taskId)).toHaveLength(0);
+});
+
+test("illegal transition to done is illegal, not a missing-merge_sha error", async () => {
+	// Regression: the merge_sha guard must run AFTER the legality check. draft→done
+	// is not a spec edge, so it is an illegal_transition (HTTP 409) — never a
+	// 400 "merge_sha required" that would mask the real reason.
+	const taskId = seedTask("draft");
+	const result = await transitionTask(handle, log, { taskId, to: "done", actor: "test" });
+	expect(result.ok).toBe(false);
+	if (!result.ok) expect(result.reason).toBe("illegal");
+	// The illegal pair must not mutate state or emit events.
+	const row = handle.db.select().from(tasks).where(eq(tasks.id, taskId)).get()!;
+	expect(row.state).toBe("draft");
 	expect(stateChangeEvents(taskId)).toHaveLength(0);
 });
 
