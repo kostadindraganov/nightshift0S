@@ -8,6 +8,7 @@ import { useEventStream } from "../lib/useEventStream.ts";
 import AppShell from "./AppShell.tsx";
 import BoardView from "../views/BoardView.tsx";
 import SettingsView from "../views/SettingsView.tsx";
+import IntakeView from "../views/IntakeView.tsx";
 import TaskDetailView from "../views/TaskDetailView.tsx";
 
 // ── Token gate ────────────────────────────────────────────────
@@ -59,7 +60,7 @@ function TokenGate() {
 
 // ── App ───────────────────────────────────────────────────────
 export default function App() {
-  const [view, setView] = useState<"board" | "settings">("board");
+  const [view, setView] = useState<"board" | "intake" | "settings">("board");
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
 
   // Subscribe to the event stream at the top level purely to drive the
@@ -88,6 +89,8 @@ export default function App() {
     <AppShell view={view} onNavigate={setView} connected={connected}>
       {view === "board" ? (
         <BoardView onOpenTask={setSelectedTaskId} />
+      ) : view === "intake" ? (
+        <IntakeView onNavigate={setView} />
       ) : (
         <SettingsView />
       )}

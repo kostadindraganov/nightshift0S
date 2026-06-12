@@ -190,3 +190,14 @@ export function importDraftTasks(body: {
     body: JSON.stringify(body),
   });
 }
+
+/** Bootstrap a project backlog from a freeform description via the planner (task 4.3). */
+export function bootstrapProject(
+  projectId: number,
+  description: string,
+): Promise<{ ok: boolean; tasks: { id: number; title: string }[] }> {
+  return apiFetch<{ ok: boolean; tasks: { id: number; title: string }[] }>(
+    `/projects/${projectId}/bootstrap`,
+    { method: "POST", body: JSON.stringify({ description }) },
+  );
+}

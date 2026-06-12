@@ -44,7 +44,7 @@ Legend: ✅ done & verified · ◑ partial (see note) · ☐ not built (deploy-p
 ## Phase F — Phase 4 start (budget allowed full)
 - ✅ **4.1 planner** (Opus) — `src/planner/planner.ts` (plan text → backlog tasks + deps, fail-closed, injectable structured-output) + tests.
 - ✅ **4.2 draft lane** (Sonnet) — `src/tasks/draftLane.ts` + `web/components/kanban/DraftColumn.tsx` (To-Do column + promote/expand) + tests.
-- ◑ **4.3 bootstrap** (Sonnet) — `src/planner/bootstrap.ts` + `src/server/plannerRoutes.ts` (structured planner call) done; **bootstrap CHAT view (text-paste UI) NOT built** → GATE 4 ◑.
+- ✅ **4.3 bootstrap** (Sonnet + follow-up) — `src/planner/bootstrap.ts` + `src/server/plannerRoutes.ts` (POST /projects/:id/bootstrap) done; **intake UI now built** (`web/views/IntakeView.tsx` — pick/create project, paste a plan, planner expands → backlog; wired into nav as "Intake"). **GATE 4 ✅ on macOS** (live planner-CLI spawn still deploy-pending).
 - ✅ **Phase4 integrate** (Opus) — wired `plannerRoutes` into `routes.ts`; typecheck + tests green.
 
 ## Phase G — Docs
@@ -60,7 +60,7 @@ End-to-end (scripted reviewer/fakes + real git/DB): task → code → PR → rev
 - Live Codex/Gemini **reviewer**-CLI spawn under real tmux (here: injectable scripted reviewer).
 - Live Codex/Gemini **planner**-CLI spawn (here: injectable scripted client).
 - **xterm.js live-attach** terminal in TaskDetailView (placeholder panel rendered).
-- Project **bootstrap chat view** (paste-a-plan intake UI) — Phase 4.3 backend done, UI pending.
+- ~~Project bootstrap chat view (paste-a-plan intake UI)~~ — **DONE** (`web/views/IntakeView.tsx`); only live planner-CLI spawn remains.
 - Live coder-session `--resume` wiring in `spawn.ts` (today: injectable `resumeCoder` dep; no real CLI resume).
 - Live GitHub push/PR + CI Checks API polling (Phase 2 deploy items); nftables egress enforcement.
 

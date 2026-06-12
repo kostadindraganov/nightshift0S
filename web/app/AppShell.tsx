@@ -2,20 +2,24 @@
 // Adapted from the ui-reference sidebar structure but rewritten clean:
 // no Next.js, no @/ imports, no shadcn — just React + CSS tokens.
 
+type View = "board" | "intake" | "settings";
+
 interface AppShellProps {
-  view: "board" | "settings";
-  onNavigate: (v: "board" | "settings") => void;
+  view: View;
+  onNavigate: (v: View) => void;
   connected: boolean;
   children: React.ReactNode;
 }
 
-const NAV_ITEMS: { id: "board" | "settings"; label: string }[] = [
+const NAV_ITEMS: { id: View; label: string }[] = [
   { id: "board", label: "Board" },
+  { id: "intake", label: "Intake" },
   { id: "settings", label: "Settings" },
 ];
 
-const VIEW_TITLES: Record<"board" | "settings", string> = {
+const VIEW_TITLES: Record<View, string> = {
   board: "Board",
+  intake: "Intake",
   settings: "Settings",
 };
 

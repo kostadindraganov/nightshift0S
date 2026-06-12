@@ -156,12 +156,14 @@ UI (WebSocket terminal stream), live PR diff fetch on the Linux host.
 4.2 ☑ Draft lane (To-Do as task state §3.10.2) + promote flow
     → verify: ☑ built & logic-tested on macOS (scripted reviewer/fakes)
 4.3 ☑ Project bootstrap (structured planner call, fail-closed task creation)
-    → verify: ☑ built & logic-tested on macOS (scripted reviewer/fakes)
-**GATE 4 ◑ (partial; intake & planner wired, 2026-06-12):** planner (`src/planner/`),
-draft lane (DraftColumn + promote API), bootstrap (bootstrap.ts). Verified on macOS
-with scripted planner + injected fakes: 385 tests pass. REMAINING for V1 complete:
-live planner-agent spawn (Codex/Gemini task-planning CLI invoke), project bootstrap
-chat UI (intake modal or dedicated view).
+    + intake UI (`web/views/IntakeView.tsx`: pick/create project, paste a plan,
+    planner expands → backlog; wired into nav as "Intake")
+    → verify: ☑ built & logic-tested on macOS; typecheck clean, frontend bundles,
+    385 tests pass.
+**GATE 4 ◑→✅ on macOS (2026-06-12):** planner (`src/planner/`), draft lane
+(DraftColumn + promote API), bootstrap (bootstrap.ts) + intake view. "Paste a plan
+→ backlog" works end-to-end with a scripted planner + injected fakes: 385 tests pass.
+REMAINING for live V1: live planner-agent spawn (Codex/Gemini task-planning CLI invoke).
 
 ## Phase 5 — V1.5 (scale & unlock)
 5.1 ☐ Auto-merge unlock behind preflight (§3.12.26) — verify protections,
