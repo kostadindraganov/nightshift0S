@@ -95,3 +95,22 @@ End-to-end (scripted reviewer/fakes + real git/DB): task → code → PR → rev
 - Triage classifier observes real run outcomes (exit_reason on Linux reap) and drives re-triage → demote/reassign/human.
 - GATE 5 target: factory overnight unattended on Linux trusted repo.
 
+## Phase 5 Batch C — Auto-Merge + Provider Matrix (2026-06-13)
+
+**Status:** 2 modules built & logic-tested on macOS with fakes/injected clients; 454 total tests pass.
+
+### Modules delivered:
+- **5.1 Auto-Merge Unlock** (`src/forge/preMerge.ts`, `preMerge.test.ts`, `review.ts` integration) — Preflight gate (§3.12.26) verifies protections (branch protection rules), trusted check apps (re-fetch from GitHub), fresh SHA (local merge-base match), no bypass perms, every merge. Tests: protection validity, SHA staleness, app-trust chain.
+- **5.4 Provider Matrix** (`src/providers/{gemini,antigravity,opencode,openrouter,local}.ts`, `conformance.test.ts` expansions) — CLI drivers (gemini-cli, antigravity, opencode) + API drivers (openrouter, local) registered in provider router; each gated by conformance (structured_output extraction, resume, cost reporting). Tests: driver fallthrough, cap detection, cost edge cases.
+
+### Verification:
+- ✅ `bun run typecheck` — **clean (0 errors)**.
+- ✅ `bun run test` — **454 pass / 0 fail** across all suites (+ 25 new tests from 5.1 + 5.4).
+- Both modules wired for macOS local-only operation (no live agent CLI spawn, no real GitHub API).
+- Per PHASE5C-CONTRACT: injectable ForgeClient, injectable provider drivers, fail-closed on every preflight gate.
+
+### Live verification (Linux/GitHub required for GATE 5):
+- **5.1 live merge:** real GitHub branch protection check, trusted check app re-fetch (OAuth flow), live merge commit on real repo.
+- **5.4 live agent spawn:** real gemini-cli/antigravity/opencode CLI invoke under tmux (scripted agent terminal), real openrouter API calls, real model cost signals (429/auth).
+- GATE 5 target: factory overnight unattended with live auto-merge + live provider mix on Linux trusted repo.
+

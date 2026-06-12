@@ -30,6 +30,19 @@ export interface NightshiftConfig {
 		defaultReviewer: string;
 		claudeCodeEnabled: boolean;
 		codexEnabled: boolean;
+		// Phase 5C V1.5 driver enable flags — all default OFF (explicit operator act).
+		geminiEnabled: boolean;
+		opencodeEnabled: boolean;
+		antigravityEnabled: boolean;
+		openrouterEnabled: boolean;
+		localEnabled: boolean;
+		// API-driver base URL / model knobs (secrets stay in env — references only).
+		// openrouterModel: unset ⇒ runOnce refuses (no silent default model).
+		openrouterModel: string;
+		// localBaseUrl: OpenAI-compatible local endpoint (ollama / llama.cpp / LM Studio).
+		localBaseUrl: string;
+		// localModel: unset ⇒ runOnce refuses.
+		localModel: string;
 	};
 	concurrency: {
 		maxParallelSlots: number;
@@ -65,6 +78,13 @@ export interface NightshiftConfig {
 	};
 	forge: {
 		provider: string;
+		/**
+		 * Allowlist of GitHub check-run App IDs whose green checks are trusted by
+		 * the auto-merge preflight (PHASE5C §3.12.26). EMPTY ⇒ preflight check (b)
+		 * BLOCKS (fail-closed): the operator must explicitly trust an app, e.g.
+		 * 15368 for GitHub Actions.
+		 */
+		trustedCheckAppIds: number[];
 	};
 	logging: {
 		level: string;
@@ -95,6 +115,16 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
 		defaultReviewer: "codex",
 		claudeCodeEnabled: true,
 		codexEnabled: true,
+		// V1.5 drivers — OFF until an operator opts in.
+		geminiEnabled: false,
+		opencodeEnabled: false,
+		antigravityEnabled: false,
+		openrouterEnabled: false,
+		localEnabled: false,
+		// Unset model ⇒ the driver's runOnce refuses; no silent default model.
+		openrouterModel: "",
+		localBaseUrl: "http://127.0.0.1:11434/v1",
+		localModel: "",
 	},
 	concurrency: {
 		maxParallelSlots: 1,
@@ -131,6 +161,9 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
 	},
 	forge: {
 		provider: "github",
+		// Empty ⇒ auto-merge preflight check (b) blocks (fail-closed). Operators add
+		// e.g. 15368 (GitHub Actions) to trust that app's green checks.
+		trustedCheckAppIds: [],
 	},
 	logging: {
 		level: "info",

@@ -17,6 +17,12 @@ import { ValidationError } from "../tasks/tasks.ts";
 import { authenticate } from "./auth.ts";
 import { jsonError, matchRoute, routes, type RouteContext } from "./routes.ts";
 import { startSchedulerLoop } from "../scheduler/loop.ts";
+import { bootProviderConformance } from "./bootProviders.ts";
+import {
+	makeAutoMergeDeps,
+	makeResolveMergeContext,
+	startAutoMergeHook,
+} from "../orchestrator/autoMergeWiring.ts";
 import {
 	makeTermWebsocket,
 	matchTermPath,
@@ -121,4 +127,42 @@ if (import.meta.main) {
 	// `startSchedulerLoop` import below documents the call site and keeps it
 	// type-checked.
 	void startSchedulerLoop;
+
+	// Boot conformance pass + auto-merge hook (PHASE5C-CONTRACT §8). Like the
+	// scheduler loop, these run ONLY here (the `bun run dev` path), NEVER inside
+	// createServer — so the test suite never spawns a CLI probe, opens a live
+	// ForgeClient, or makes a GitHub call.
+	//
+	//   const { handle, events, config } = /* from createServer internals */;
+	//   // 1. Prove every enabled driver's capabilities and hand the routable
+	//   //    list to the scheduler's resolveSpawn (selectDriver consumes it).
+	//   const routable = await bootProviderConformance({ handle, log: events, config });
+	//
+	//   // 2. Auto-merge hook — gated on review.autoMergeEnabled (default false).
+	//   //    Fail-closed: resolveRepo is host-owned; until it maps a project to
+	//   //    owner/repo/defaultBranch, resolveMergeContext returns null → every
+	//   //    attempt blocks at preflight ("merge context unresolved"). The live
+	//   //    forge token comes from createGitHubForgeClient (host-side, never an
+	//   //    agent env).
+	//   if (config.review.autoMergeEnabled) {
+	//     const forgeClient = await createGitHubForgeClient();
+	//     const resolveMergeContext = makeResolveMergeContext({
+	//       handle,
+	//       resolveRepo: hostRepoCoordinatesClosure, // owner/repo/defaultBranch per task
+	//     });
+	//     const autoMergeDeps = makeAutoMergeDeps({
+	//       handle, log: events, config, forgeClient, resolveMergeContext,
+	//     });
+	//     const hook = startAutoMergeHook({ log: events, autoMergeDeps });
+	//     process.on("SIGTERM", () => hook.stop());
+	//   }
+	//
+	// Left unwired this wave (host repo-coordinates closure is operator-owned,
+	// same pattern as resolveSpawn); the imports below document the call site and
+	// keep it type-checked. Auto-merge stays OFF until both the knob and the
+	// host closure are wired (GATE 5 / Linux VM).
+	void bootProviderConformance;
+	void makeResolveMergeContext;
+	void makeAutoMergeDeps;
+	void startAutoMergeHook;
 }
