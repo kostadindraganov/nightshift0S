@@ -38,6 +38,11 @@ import { eq } from "drizzle-orm";
 import { projects } from "../db/schema.ts";
 import type { TaskRow, RunRow } from "../db/schema.ts";
 import type { SpawnPlan } from "../scheduler/scheduler.ts";
+import { startCoderCompletionTrigger } from "../orchestrator/coderCompletionTrigger.ts";
+import { startReviewTrigger } from "../orchestrator/reviewTrigger.ts";
+import { startAgentsMdCadence } from "../maintenance/agentsMdCadence.ts";
+import { makeEvidenceResolveSpawn } from "../orchestrator/evidenceRouting.ts";
+import type { RepoConfig } from "../orchestrator/coder.ts";
 
 export const DEFAULT_PORT = 3000;
 
@@ -277,8 +282,89 @@ if (import.meta.main) {
 				void startAutoMergeHook;
 			}
 
-			// Start the unattended scheduler loop with the wired host closures.
-			void startSchedulerLoop({ handle, log: events, config, resolveSpawn, readTranscriptTail, runActivity })
+			// ── GATE-5: evidence-based routing wrap (6.D2) ───────────────────────
+			// Wrap resolveSpawn so the scheduler picks the best-performing enabled
+			// coder provider among the candidates using historical run evidence
+			// (§3.7). Ordered defaultCoder-first so cold-start (no evidence yet)
+			// keeps the normal default; once runs accrue, evidence dominates.
+			// Fail-closed: any throw inside the wrapper falls back to the base plan.
+			const coderCandidates: string[] = [config.providers.defaultCoder];
+			if (config.providers.claudeCodeEnabled && !coderCandidates.includes("claude-code"))
+				coderCandidates.push("claude-code");
+			if (config.providers.codexEnabled && !coderCandidates.includes("codex"))
+				coderCandidates.push("codex");
+			const wrappedResolveSpawn = makeEvidenceResolveSpawn(resolveSpawn, {
+				handle,
+				candidatesFor: () => coderCandidates,
+			});
+
+			// resolveRepoConfig: project.repoUrl → local RepoConfig. Throws (fail-closed)
+			// when the project/repo cannot be mapped — callers catch and skip.
+			function resolveRepoConfig(task: TaskRow): RepoConfig {
+				if (task.projectId == null) throw new Error(`task ${task.id} has no projectId`);
+				const project = handle.db
+					.select()
+					.from(projects)
+					.where(eq(projects.id, task.projectId))
+					.get();
+				if (!project) throw new Error(`project ${task.projectId} not found for task ${task.id}`);
+				const repoDir = resolveRepoDir(project.repoUrl);
+				if (!repoDir) throw new Error(`cannot map repoUrl "${project.repoUrl}" to a local path`);
+				const m = project.repoUrl.match(/[:/]([^/:]+)\/([^/.]+?)(?:\.git)?$/);
+				return {
+					repoDir,
+					worktreePath: repoDir,
+					remoteUrl: project.repoUrl,
+					owner: m?.[1] ?? "",
+					repo: m?.[2] ?? "",
+					defaultBranch: "main",
+				};
+			}
+
+			// ── GATE-5: coder-completion trigger (closes GATE-2 live) ────────────
+			// On a coder run → succeeded, run the forge/CI/push/PR pipeline
+			// (coding→review). Fail-closed: a missing token / repo skips the run.
+			const coderCompletion = startCoderCompletionTrigger({
+				handle,
+				log: events,
+				resolveRepo: (task) => resolveRepoConfig(task),
+			});
+			process.on("SIGTERM", () => coderCompletion.stop());
+			process.on("SIGINT", () => coderCompletion.stop());
+
+			// ── GATE-5: review-round trigger (closes GATE-3 live) ────────────────
+			// On a task → review, spawn the reviewer and run one ping-pong round.
+			const reviewTrigger = startReviewTrigger({
+				handle,
+				log: events,
+				config,
+				...(process.env.NIGHTSHIFT_REPO_DIR
+					? { repoDir: process.env.NIGHTSHIFT_REPO_DIR }
+					: {}),
+			});
+			process.on("SIGTERM", () => reviewTrigger.stop());
+			process.on("SIGINT", () => reviewTrigger.stop());
+
+			// ── AGENTS.md upkeep cadence (6.B4/6.D4) — advisory proposals every 6h ─
+			const agentsMdCadence = startAgentsMdCadence({
+				handle,
+				log: events,
+				intervalMs: 6 * 60 * 60 * 1000,
+				resolveRepoDir,
+			});
+			process.on("SIGTERM", () => agentsMdCadence.stop());
+			process.on("SIGINT", () => agentsMdCadence.stop());
+
+			// Start the unattended scheduler loop with the wired host closures
+			// (resolveSpawn wrapped by the evidence router).
+			void startSchedulerLoop({
+				handle,
+				log: events,
+				config,
+				resolveSpawn: wrappedResolveSpawn,
+				readTranscriptTail,
+				runActivity,
+			})
 				.then((loop) => {
 					process.on("SIGTERM", () => loop.stop());
 					process.on("SIGINT", () => loop.stop());

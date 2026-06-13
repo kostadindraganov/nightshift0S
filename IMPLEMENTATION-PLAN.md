@@ -412,10 +412,27 @@ ready task is skipped, never a pretend spawn). GATE-5 worklist status:
   - ☑ **Anti Gravity CLI rename** (`agy`): `gemini.ts`, `antigravity.ts` (now full headless
     `agy` driver, not fail-closed stub), `cliUpdate.ts`, `cliDrivers.test.ts` all updated.
     `agy` v1.0.8 installed at `/home/nightshift/.local/bin/agy`.
-  - ☐ **Wire remaining host closures:** `produceFinder` specialist spawn (5.6), evidence-routing
-    wrap (6.D2), experiment-run dispatch (6.A4/6.D3), AGENTS.md upkeep cadence (6.B4/6.D4).
+  - ☑ **Coder-completion trigger** (closes GATE-2 live): `src/orchestrator/coderCompletionTrigger.ts`
+    — subscribes TAIL-ONLY to run.state_changed; on a coder run → succeeded, builds prod coder deps
+    (fail-closed on missing GITHUB_TOKEN) and runs `completeCoderRun` (branch-freshness/CI/push/PR →
+    task coding→review). prodDeps.ts had NO live caller before this; now wired in `main.ts` onReady.
+  - ☑ **Review-round trigger** (closes GATE-3 live): `src/orchestrator/reviewTrigger.ts`
+    — subscribes TAIL-ONLY to task.state_changed; on a task → review, assembles live ReviewDeps
+    (threadApi + runVerdict + codeReviewJudge + liveSpawn makeGetDiff/makeRunReviewer/makeResumeCoder;
+    tournament-aware) and runs `runReviewRound` (approve→approved / revise→resume coder ping-pong).
+  - ☑ **Evidence-based routing wrap (6.D2)**: `makeEvidenceResolveSpawn` now wraps `resolveSpawn`
+    in `main.ts` (candidates = enabled coder providers, defaultCoder-first for cold-start).
+  - ☑ **AGENTS.md upkeep cadence (6.B4/6.D4)**: `src/maintenance/agentsMdCadence.ts` — 6h advisory
+    sweep per project (scan → propose → emit `maintenance.agents_md.proposed`; never auto-writes).
+  - All three modules built via multi-agent workflow + tested (21 new tests, all green; full suite
+    1177 pass / 4 pre-existing bwrap-on-Linux fails; typecheck clean). Service restarted & verified
+    live (scheduler loop + 3 triggers running; /healthz + /readyz ok).
+  - ☐ **Wire remaining host closures:** `produceFinder` specialist spawn (5.6 — §3.4 harness needs a
+    harness-based review round, not the single-judge `runReviewRound`), experiment-run dispatch
+    (6.A4/6.D3 — scheduler has no experiment-kind branch yet; needs a run-creation seam).
   - ☐ **Run the "fix typo" task end-to-end** per `docs/LINUX-DEPLOY.md`: real spawn → push → PR →
-    review ping-pong → human merge → dependents unblock (closes GATE 2/3/4 live).
+    review ping-pong → human merge → dependents unblock (closes GATE 2/3/4 live). The triggers are
+    now wired and inert until a live coder run actually succeeds (needs bwrap/egress active).
   - ☐ **Activate the runtime surfaces:** bwrap (2.3) + nftables egress (2.4) + container run (7.1);
     remote worker daemons (7.2); live CLI update exec (7.3); live preview deploy/reverse-proxy/DNS (7.4);
     live CMA API + conformance (7.5); prompt-optimize propose/evaluate (7.6); third-reviewer
