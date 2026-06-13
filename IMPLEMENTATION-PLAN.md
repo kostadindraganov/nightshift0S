@@ -367,6 +367,53 @@ run-spawn integration, remote worker daemons pulling the queue, live CLI update 
 deploy/reverse-proxy/DNS, live CMA API + conformance, live third-reviewer spawn. Every code-able
 surface is built, green, and wired; what remains needs the Linux runtime + real provider/infra surfaces.
 
+## Phase 8 — macOS board UX + readiness fix (DONE ☑ 2026-06-13) → then Linux GATE-5 finish
+
+Owner-driven dev session: ran the server on macOS, added tasks via the UI/API, surfaced two real
+issues. Both fixed, verified, and green on macOS.
+
+8.1 ☑ **Board project switcher + task add/delete (UI).** `web/views/BoardView.tsx` was hard-pinned
+    to `projects[0]` (any task on another project was invisible). Added a project `<select>`
+    dropdown + an inline "Add task" composer; a delete "×" on cards threaded
+    TaskCard / DraftColumn → SortableTaskCard / KanbanColumn → `KanbanBoard.handleDelete`;
+    `DELETABLE_STATES` mirror added to `web/components/kanban/types.ts` (× shown only for
+    draft/backlog/cancelled/done, matching the server). NOTE: create + delete emit NO SSE event
+    (only transitions do) → the board refetches explicitly via a `reloadSignal` prop bump (add)
+    and `loadTasks()` (delete).
+    → verify: typecheck clean; standalone bundle builds (44 modules); live create→appears,
+      delete→gone round-trip.
+
+8.2 ☑ **Readiness-recompute bug — a zero-dependency task stuck in `backlog` forever.**
+    `backlog→ready` is `systemOnly` (the UI drag is correctly reverted) and is ONLY driven by
+    `recomputeReadiness` (`src/tasks/dependencies.ts`), which fired on transition→done /
+    dependency add-remove / coder-run-finish / triage — but **never after `promote` (draft→backlog)**,
+    and no periodic/boot recompute existed. So a no-dependency task (which should be ready
+    immediately) sat in backlog with no path forward. Fix: (a) `src/server/routes.ts` promote
+    handler now calls `recomputeReadiness(projectId)` after a successful promote → a no-dep task
+    goes draft→backlog→ready at once (mirrors the dependency-endpoint pattern); (b) `src/server/main.ts`
+    `onReady` runs a boot-time `recomputeReadiness(handle, events)` across all projects
+    (dev/Linux path only, never under test) as a safety net that unsticks already-backlog tasks
+    on restart.
+    → verify: 124/124 (server + tasks + scheduler + orchestrator), typecheck clean; live
+      promote→`ready` + boot recompute unstuck the existing tasks.
+
+**GATE 5 — Linux finish (NEXT: moving to the Linux host to complete ALL remaining tasks).**
+On macOS a `ready` task correctly **PARKS** — it does NOT auto-advance to `coding` — because the
+scheduler's host `resolveSpawn` closure (project `repoUrl` → local checkout + prompt build + live
+`claude`/coder spawn) is intentionally unwired off-Linux (`main.ts:148-168`, fail-closes → every
+ready task is skipped, never a pretend spawn). The consolidated GATE-5 worklist to finish on Linux
+(rolls up every runtime-pending item from Phases 2–7):
+  - **Boot-wire the host closures in `main.ts`:** `resolveSpawn` (repo→checkout + prompt + live spawn),
+    `produceFinder` specialist spawn (5.6), cron/notifier/digest timers (5.8/6), evidence-routing wrap
+    (6.D2), experiment-run dispatch (6.A4/6.D3), AGENTS.md upkeep cadence (6.B4/6.D4), auto-merge hook
+    (5.1, gated on `review.autoMergeEnabled`).
+  - **Run the "fix typo" task end-to-end** per `docs/LINUX-DEPLOY.md`: real spawn → push → PR →
+    review ping-pong → human merge → dependents unblock (closes GATE 2/3/4 live).
+  - **Activate the runtime surfaces:** bwrap (2.3) + nftables egress (2.4) + container run (7.1);
+    remote worker daemons (7.2); live CLI update exec (7.3); live preview deploy/reverse-proxy/DNS (7.4);
+    live CMA API + conformance (7.5); prompt-optimize propose/evaluate (7.6); third-reviewer
+    tiebreaker spawn (7.7); real `playwright install` + browser verify (6.B5).
+
 ---
 
 ## How to resume a session (for the operator)

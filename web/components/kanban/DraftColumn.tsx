@@ -20,9 +20,10 @@ interface DraftCardProps {
 	onPromote: (taskId: number) => void;
 	promoting: boolean;
 	onOpenTask?: (id: number) => void;
+	onDelete?: (id: number) => void;
 }
 
-function DraftTaskCard({ task, onPromote, promoting, onOpenTask }: DraftCardProps) {
+function DraftTaskCard({ task, onPromote, promoting, onOpenTask, onDelete }: DraftCardProps) {
 	return (
 		<div
 			style={{
@@ -81,28 +82,57 @@ function DraftTaskCard({ task, onPromote, promoting, onOpenTask }: DraftCardProp
 				>
 					#{task.id}
 				</span>
-				<button
-					onClick={(e) => {
-						e.stopPropagation();
-						onPromote(task.id);
-					}}
-					disabled={promoting}
-					style={{
-						padding: "2px 8px",
-						borderRadius: "var(--radius-pill)",
-						background: promoting ? "var(--color-surface-elevated)" : "var(--color-primary)",
-						color: promoting ? "var(--color-muted)" : "var(--color-on-primary)",
-						border: "none",
-						fontSize: 11,
-						fontWeight: 600,
-						fontFamily: "var(--font-sans)",
-						cursor: promoting ? "default" : "pointer",
-						transition: "background 0.15s",
-						flexShrink: 0,
-					}}
-				>
-					{promoting ? "Promoting…" : "Promote"}
-				</button>
+				<div style={{ display: "flex", alignItems: "center", gap: "var(--space-xs)", flexShrink: 0 }}>
+					{onDelete && (
+						<button
+							aria-label={`Delete task #${task.id}`}
+							title="Delete task"
+							onPointerDown={(e) => e.stopPropagation()}
+							onClick={(e) => {
+								e.stopPropagation();
+								if (window.confirm(`Delete task "${task.title}"?`)) {
+									onDelete(task.id);
+								}
+							}}
+							disabled={promoting}
+							style={{
+								width: 20,
+								height: 20,
+								lineHeight: "18px",
+								padding: 0,
+								borderRadius: "var(--radius-sm)",
+								background: "transparent",
+								border: "1px solid var(--color-hairline)",
+								color: "var(--color-muted)",
+								fontSize: 14,
+								cursor: promoting ? "default" : "pointer",
+							}}
+						>
+							×
+						</button>
+					)}
+					<button
+						onClick={(e) => {
+							e.stopPropagation();
+							onPromote(task.id);
+						}}
+						disabled={promoting}
+						style={{
+							padding: "2px 8px",
+							borderRadius: "var(--radius-pill)",
+							background: promoting ? "var(--color-surface-elevated)" : "var(--color-primary)",
+							color: promoting ? "var(--color-muted)" : "var(--color-on-primary)",
+							border: "none",
+							fontSize: 11,
+							fontWeight: 600,
+							fontFamily: "var(--font-sans)",
+							cursor: promoting ? "default" : "pointer",
+							transition: "background 0.15s",
+						}}
+					>
+						{promoting ? "Promoting…" : "Promote"}
+					</button>
+				</div>
 			</div>
 		</div>
 	);
@@ -115,9 +145,10 @@ interface SortableDraftCardProps {
 	onPromote: (taskId: number) => void;
 	promoting: boolean;
 	onOpenTask?: (id: number) => void;
+	onDelete?: (id: number) => void;
 }
 
-function SortableDraftCard({ task, onPromote, promoting, onOpenTask }: SortableDraftCardProps) {
+function SortableDraftCard({ task, onPromote, promoting, onOpenTask, onDelete }: SortableDraftCardProps) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
 		id: task.id,
 		data: { task },
@@ -140,6 +171,7 @@ function SortableDraftCard({ task, onPromote, promoting, onOpenTask }: SortableD
 				onPromote={onPromote}
 				promoting={promoting}
 				onOpenTask={onOpenTask}
+				onDelete={onDelete}
 			/>
 		</div>
 	);
@@ -153,9 +185,10 @@ interface DraftColumnProps {
 	onTaskPromoted: (taskId: number) => void;
 	onToast: (msg: string) => void;
 	onOpenTask?: (id: number) => void;
+	onDelete?: (id: number) => void;
 }
 
-export function DraftColumn({ col, tasks, onTaskPromoted, onToast, onOpenTask }: DraftColumnProps) {
+export function DraftColumn({ col, tasks, onTaskPromoted, onToast, onOpenTask, onDelete }: DraftColumnProps) {
 	const { setNodeRef, isOver } = useDroppable({ id: col.id });
 	const [promotingIds, setPromotingIds] = useState<Set<number>>(new Set());
 	const ids = tasks.map((t) => t.id);
@@ -244,6 +277,7 @@ export function DraftColumn({ col, tasks, onTaskPromoted, onToast, onOpenTask }:
 							onPromote={handlePromote}
 							promoting={promotingIds.has(task.id)}
 							onOpenTask={onOpenTask}
+							onDelete={onDelete}
 						/>
 					))}
 				</SortableContext>

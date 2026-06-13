@@ -146,15 +146,23 @@ curl -H "Authorization: Bearer $TOKEN" \
 ### Quick deploy
 
 ```sh
-# On the server as root (or sudo):
+# On the server as a sudo user:
 git clone https://github.com/your-org/nightshift.git /opt/nightshift
 cd /opt/nightshift
 
+# 0. Prepare the host (OS packages + Node/claude/codex + Bun). Idempotent.
+#    Skip if git/tmux/bwrap/nft + claude/codex are already installed.
+bash ops/prep-debian.sh
+
+# 1. Deploy (service user, DB migrate, systemd, health-check):
 sudo \
   NIGHTSHIFT_API_TOKEN="$(openssl rand -hex 32)" \
   GITHUB_TOKEN="ghp_yourtoken" \
   bash ops/deploy.sh
 ```
+
+> For an agent-driven, step-by-step setup with verify gates, hand
+> **`docs/LINUX-SETUP-AGENT.md`** to a Claude Code CLI running on the host.
 
 `ops/deploy.sh` is idempotent. It:
 1. Creates a `nightshift` service user

@@ -135,3 +135,12 @@ export const LEGAL_EDGES = new Set<Edge>([
 
 export const SYSTEM_ONLY_EDGES = new Set<Edge>(["backlog->ready"]);
 export const NEEDS_MERGE_SHA_EDGES = new Set<Edge>(["merging->done"]);
+
+// States a task may be deleted from — mirrors the server's DELETABLE_STATES
+// (parked states only; mid-flight tasks must be cancelled first).
+export const DELETABLE_STATES = new Set<TaskState>([
+  "draft",
+  "backlog",
+  "cancelled",
+  "done",
+]);

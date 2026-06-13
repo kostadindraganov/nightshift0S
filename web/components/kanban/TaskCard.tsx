@@ -1,12 +1,14 @@
 // TaskCard — a single kanban task card with state badge, chips, and mono id.
 // Used both in columns and as the DragOverlay ghost.
 import type { Task } from "./types.ts";
+import { DELETABLE_STATES } from "./types.ts";
 import { StateBadge } from "./stateBadge.tsx";
 
 interface TaskCardProps {
   task: Task;
   isDragging?: boolean;
   onOpenTask?: (id: number) => void;
+  onDelete?: (id: number) => void;
 }
 
 function riskColor(tier: string): string {
@@ -20,7 +22,8 @@ function riskColor(tier: string): string {
   }
 }
 
-export function TaskCard({ task, isDragging = false, onOpenTask }: TaskCardProps) {
+export function TaskCard({ task, isDragging = false, onOpenTask, onDelete }: TaskCardProps) {
+  const canDelete = !isDragging && onDelete && DELETABLE_STATES.has(task.state);
   return (
     <div
       style={{
@@ -48,20 +51,51 @@ export function TaskCard({ task, isDragging = false, onOpenTask }: TaskCardProps
         }
       }}
     >
-      {/* Title */}
-      <div
-        className="t-body-sm"
-        style={{
-          color: "var(--color-ink)",
-          fontWeight: 500,
-          lineClamp: 2,
-          overflow: "hidden",
-          display: "-webkit-box",
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: "vertical" as const,
-        }}
-      >
-        {task.title}
+      {/* Title row: title + optional delete button */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 4 }}>
+        <div
+          className="t-body-sm"
+          style={{
+            flex: 1,
+            color: "var(--color-ink)",
+            fontWeight: 500,
+            lineClamp: 2,
+            overflow: "hidden",
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical" as const,
+          }}
+        >
+          {task.title}
+        </div>
+        {canDelete && (
+          <button
+            aria-label={`Delete task #${task.id}`}
+            title="Delete task"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (window.confirm(`Delete task "${task.title}"?`)) {
+                onDelete?.(task.id);
+              }
+            }}
+            style={{
+              flexShrink: 0,
+              width: 20,
+              height: 20,
+              lineHeight: "18px",
+              padding: 0,
+              borderRadius: "var(--radius-sm)",
+              background: "transparent",
+              border: "1px solid var(--color-hairline)",
+              color: "var(--color-muted)",
+              fontSize: 14,
+              cursor: "pointer",
+            }}
+          >
+            ×
+          </button>
+        )}
       </div>
 
       {/* State badge */}

@@ -527,7 +527,18 @@ export const routes: Route[] = [
 				}
 				return jsonError(500, "planner_error", result.message);
 			}
-			return json({ task: result.task, expanded: result.expanded });
+			// A task entering backlog is immediately eligible for ready if its
+			// dependencies are all merged (vacuously true for zero-dep tasks).
+			// Without this, a no-dependency task sits in backlog until some
+			// unrelated recompute trigger fires for the project. The follow-up
+			// backlog→ready transition emits its own task.state_changed event.
+			const promoted = await recomputeReadiness(
+				ctx.handle,
+				ctx.events,
+				result.task.projectId,
+			);
+			const advanced = promoted.find((t) => t.id === result.task.id);
+			return json({ task: advanced ?? result.task, expanded: result.expanded });
 		},
 	},
 	{

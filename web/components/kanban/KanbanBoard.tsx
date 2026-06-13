@@ -31,12 +31,14 @@ import { DraftColumn } from "./DraftColumn.tsx";
 import { TaskCard } from "./TaskCard.tsx";
 import { Toast } from "./Toast.tsx";
 import { useEventStream } from "../../lib/useEventStream.ts";
-import { listTasks, transitionTask, updateTask } from "../../lib/api.ts";
+import { listTasks, transitionTask, updateTask, deleteTask } from "../../lib/api.ts";
 import type { NightshiftEvent } from "../../lib/api.ts";
 
 interface Props {
   projectId: number;
   onOpenTask?: (id: number) => void;
+  /** Bump to force a task refetch (e.g. after creating a task elsewhere). */
+  reloadSignal?: number;
 }
 
 type LoadState =
@@ -103,7 +105,7 @@ function liveIndicator(connected: boolean) {
   );
 }
 
-export function KanbanBoard({ projectId, onOpenTask }: Props) {
+export function KanbanBoard({ projectId, onOpenTask, reloadSignal }: Props) {
   const [loadState, setLoadState] = useState<LoadState>({ kind: "loading" });
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
@@ -131,7 +133,23 @@ export function KanbanBoard({ projectId, onOpenTask }: Props) {
 
   useEffect(() => {
     void loadTasks();
-  }, [loadTasks]);
+  }, [loadTasks, reloadSignal]);
+
+  // Delete a task (only parked states are deletable; server enforces). No SSE
+  // event is emitted for deletes, so refetch explicitly.
+  const handleDelete = useCallback(
+    async (taskId: number) => {
+      try {
+        await deleteTask(taskId);
+        await loadTasks();
+      } catch (e) {
+        setToastMsg(
+          e instanceof Error ? e.message : `Failed to delete task #${taskId}`,
+        );
+      }
+    },
+    [loadTasks],
+  );
 
   // SSE handler — debounced refetch on any task-related event.
   const handleEvent = useCallback(
@@ -421,9 +439,10 @@ export function KanbanBoard({ projectId, onOpenTask }: Props) {
                 onTaskPromoted={() => void loadTasks()}
                 onToast={setToastMsg}
                 onOpenTask={onOpenTask}
+                onDelete={handleDelete}
               />
             ) : (
-              <KanbanColumn key={col.id} col={col} tasks={grouped[col.id] ?? []} onOpenTask={onOpenTask} />
+              <KanbanColumn key={col.id} col={col} tasks={grouped[col.id] ?? []} onOpenTask={onOpenTask} onDelete={handleDelete} />
             )
           )}
         </div>

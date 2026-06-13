@@ -19,10 +19,17 @@ type ViewState =
   | { kind: "empty" }
   | { kind: "seeding" }
   | { kind: "error"; message: string }
-  | { kind: "ready"; project: Project };
+  | { kind: "ready"; projects: Project[]; selectedId: number };
 
 export default function BoardView({ onOpenTask }: BoardViewProps) {
   const [state, setState] = useState<ViewState>({ kind: "loading" });
+  // Bumped after creating a task to force the board to refetch (create emits
+  // no SSE event).
+  const [reloadSignal, setReloadSignal] = useState(0);
+  // Inline "add task" composer state.
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -30,7 +37,7 @@ export default function BoardView({ onOpenTask }: BoardViewProps) {
         const projects = await listProjects();
         const first = projects[0];
         if (first) {
-          setState({ kind: "ready", project: first });
+          setState({ kind: "ready", projects, selectedId: first.id });
         } else {
           setState({ kind: "empty" });
         }
@@ -42,6 +49,22 @@ export default function BoardView({ onOpenTask }: BoardViewProps) {
       }
     })();
   }, []);
+
+  async function addTask(projectId: number) {
+    const title = newTitle.trim();
+    if (!title) return;
+    setAdding(true);
+    try {
+      await createTask({ project_id: projectId, title });
+      setNewTitle("");
+      setComposerOpen(false);
+      setReloadSignal((n) => n + 1);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Failed to add task");
+    } finally {
+      setAdding(false);
+    }
+  }
 
   async function seedDemo() {
     setState({ kind: "seeding" });
@@ -85,7 +108,12 @@ export default function BoardView({ onOpenTask }: BoardViewProps) {
           risk_tier: "low",
         }),
       ]);
-      setState({ kind: "ready", project });
+      const projects = await listProjects();
+      setState({
+        kind: "ready",
+        projects: projects.length > 0 ? projects : [project],
+        selectedId: project.id,
+      });
     } catch (e) {
       setState({
         kind: "error",
@@ -180,6 +208,9 @@ export default function BoardView({ onOpenTask }: BoardViewProps) {
   }
 
   // state.kind === "ready"
+  const { projects, selectedId } = state;
+  const selected = projects.find((p) => p.id === selectedId) ?? projects[0];
+
   return (
     <div
       style={{
@@ -198,26 +229,140 @@ export default function BoardView({ onOpenTask }: BoardViewProps) {
           padding: "var(--space-sm) var(--space-md)",
           borderBottom: "1px solid var(--color-hairline)",
           flexShrink: 0,
+          flexWrap: "wrap",
         }}
       >
-        <span className="t-title-sm" style={{ color: "var(--color-ink)" }}>
-          {state.project.name}
-        </span>
+        {/* Project selector */}
+        <select
+          aria-label="Select project"
+          value={selectedId}
+          onChange={(e) =>
+            setState({
+              kind: "ready",
+              projects,
+              selectedId: Number(e.target.value),
+            })
+          }
+          style={{
+            padding: "var(--space-xs) var(--space-sm)",
+            background: "var(--color-surface-card)",
+            color: "var(--color-ink)",
+            border: "1px solid var(--color-hairline)",
+            borderRadius: "var(--radius-md)",
+            fontFamily: "var(--font-sans)",
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
         <span
           className="t-code"
           style={{ color: "var(--color-muted)", fontSize: 12 }}
         >
-          {state.project.repoUrl}
+          {selected?.repoUrl}
         </span>
+
+        <div style={{ flex: 1 }} />
+
+        {/* Add-task composer */}
+        {composerOpen ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void addTask(selectedId);
+            }}
+            style={{ display: "flex", alignItems: "center", gap: "var(--space-xs)" }}
+          >
+            <input
+              autoFocus
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              placeholder="Task title…"
+              disabled={adding}
+              style={{
+                padding: "var(--space-xs) var(--space-sm)",
+                background: "var(--color-surface-card)",
+                color: "var(--color-ink)",
+                border: "1px solid var(--color-hairline)",
+                borderRadius: "var(--radius-md)",
+                fontFamily: "var(--font-sans)",
+                fontSize: 14,
+                minWidth: 220,
+              }}
+            />
+            <button
+              type="submit"
+              disabled={adding || newTitle.trim() === ""}
+              style={{ ...headerBtnStyle, opacity: adding || newTitle.trim() === "" ? 0.6 : 1 }}
+            >
+              {adding ? "Adding…" : "Add"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setComposerOpen(false);
+                setNewTitle("");
+              }}
+              disabled={adding}
+              style={headerBtnGhostStyle}
+            >
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <button onClick={() => setComposerOpen(true)} style={headerBtnStyle}>
+            + Add task
+          </button>
+        )}
       </div>
 
       {/* Kanban board takes remaining height */}
       <div style={{ height: "calc(100% - 49px)", overflow: "hidden" }}>
-        <KanbanBoard projectId={state.project.id} onOpenTask={onOpenTask} />
+        <KanbanBoard
+          projectId={selectedId}
+          onOpenTask={onOpenTask}
+          reloadSignal={reloadSignal}
+        />
       </div>
     </div>
   );
 }
+
+const headerBtnStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "var(--space-xs) var(--space-md)",
+  background: "var(--color-primary)",
+  color: "var(--color-on-primary)",
+  border: "none",
+  borderRadius: "var(--radius-md)",
+  fontFamily: "var(--font-sans)",
+  fontSize: 14,
+  fontWeight: 600,
+  cursor: "pointer",
+};
+
+const headerBtnGhostStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "var(--space-xs) var(--space-md)",
+  background: "transparent",
+  color: "var(--color-muted)",
+  border: "1px solid var(--color-hairline)",
+  borderRadius: "var(--radius-md)",
+  fontFamily: "var(--font-sans)",
+  fontSize: 14,
+  fontWeight: 600,
+  cursor: "pointer",
+};
 
 const centerStyle: React.CSSProperties = {
   display: "flex",

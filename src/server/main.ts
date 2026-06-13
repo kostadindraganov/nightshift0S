@@ -14,6 +14,7 @@ import { openDatabase, type DbHandle } from "../db/client.ts";
 import { runMigrations } from "../db/migrate.ts";
 import { EventLog } from "../events/events.ts";
 import { ValidationError } from "../tasks/tasks.ts";
+import { recomputeReadiness } from "../tasks/dependencies.ts";
 import { authenticate } from "./auth.ts";
 import { jsonError, matchRoute, routes, type RouteContext } from "./routes.ts";
 import { startSchedulerLoop } from "../scheduler/loop.ts";
@@ -122,6 +123,17 @@ if (import.meta.main) {
 	const server = createServer({
 		dev: true,
 		onReady: ({ handle, events }) => {
+			// Boot safety net: promote any backlog task whose dependencies are all
+			// merged (vacuously true for zero-dep tasks) to ready. Readiness is
+			// otherwise only recomputed on dependency/merge events, so a task that
+			// entered backlog without such an event would sit there forever. Runs
+			// only on the dev/Linux path (onReady is never passed under test).
+			void recomputeReadiness(handle, events).catch((err) =>
+				console.error(
+					"boot readiness recompute failed:",
+					err instanceof Error ? err.message : err,
+				),
+			);
 			try {
 				const v2 = startV2Loops({
 					handle,
