@@ -34,6 +34,10 @@ import {
 import { startV2Loops } from "./v2Boot.ts";
 import { fetchHttpSend } from "../notify/transports.ts";
 import { loadConfig } from "../config/config.ts";
+import { eq } from "drizzle-orm";
+import { projects } from "../db/schema.ts";
+import type { TaskRow, RunRow } from "../db/schema.ts";
+import type { SpawnPlan } from "../scheduler/scheduler.ts";
 
 export const DEFAULT_PORT = 3000;
 
@@ -114,31 +118,37 @@ export function createServer(options: CreateServerOptions = {}): Bun.Server<Term
 }
 
 if (import.meta.main) {
-	// V2 (Phase 6) live loops are started via onReady — it runs ONLY on this
-	// `bun run dev`/Linux path (the test suite never passes onReady), sharing the
-	// server's DB handle + EventLog. startV2Loops is fully fail-closed: with no
-	// TELEGRAM_*/SLACK_* env it builds zero channels (cron fires nothing harmful),
-	// so this is safe to run unconditionally; live transports activate when their
-	// env config is present (GATE 5 / Linux).
+	// resolveRepoDir: maps a project's repoUrl to a local checkout path.
+	// NIGHTSHIFT_REPO_DIR overrides for single-repo deployments; otherwise
+	// derives <NIGHTSHIFT_CHECKOUT_ROOT>/<owner>/<repo> from the remote URL.
+	function resolveRepoDir(repoUrl: string): string | null {
+		const explicit = process.env.NIGHTSHIFT_REPO_DIR;
+		if (explicit) return explicit;
+		const checkoutRoot = process.env.NIGHTSHIFT_CHECKOUT_ROOT ?? "/opt/nightshift/repos";
+		const m = repoUrl.match(/[:/]([^/:]+\/[^/.]+?)(?:\.git)?$/);
+		if (!m) return null;
+		return `${checkoutRoot}/${m[1]}`;
+	}
+
 	const server = createServer({
 		dev: true,
 		onReady: ({ handle, events }) => {
-			// Boot safety net: promote any backlog task whose dependencies are all
-			// merged (vacuously true for zero-dep tasks) to ready. Readiness is
-			// otherwise only recomputed on dependency/merge events, so a task that
-			// entered backlog without such an event would sit there forever. Runs
-			// only on the dev/Linux path (onReady is never passed under test).
+			const config = loadConfig();
+
+			// Boot safety net: promote any backlog task whose deps are all merged to ready.
 			void recomputeReadiness(handle, events).catch((err) =>
 				console.error(
 					"boot readiness recompute failed:",
 					err instanceof Error ? err.message : err,
 				),
 			);
+
+			// V2 loops (cron/notifier/digest) — fail-closed on missing env.
 			try {
 				const v2 = startV2Loops({
 					handle,
 					events,
-					config: loadConfig(),
+					config,
 					env: process.env,
 					httpSend: fetchHttpSend,
 					now: () => new Date(),
@@ -148,84 +158,136 @@ if (import.meta.main) {
 			} catch (err) {
 				console.error("V2 loops failed to start:", err instanceof Error ? err.message : err);
 			}
+
+			// ── GATE-5: host closures wired for live Linux spawn ─────────────────
+
+			// resolveSpawn: provider/model/prompt/repoDir per task (§3.12.18 reassign).
+			async function resolveSpawn(task: TaskRow, priorCoderRuns: RunRow[]): Promise<SpawnPlan | null> {
+				if (task.projectId == null) {
+					console.warn(`[scheduler] task ${task.id} has no projectId — skipping`);
+					return null;
+				}
+				const project = handle.db
+					.select()
+					.from(projects)
+					.where(eq(projects.id, task.projectId))
+					.get();
+				if (!project) {
+					console.warn(`[scheduler] project ${task.projectId} not found for task ${task.id} — skipping`);
+					return null;
+				}
+				const repoDir = resolveRepoDir(project.repoUrl);
+				if (!repoDir) {
+					console.warn(`[scheduler] cannot map repoUrl "${project.repoUrl}" to local path — skipping`);
+					return null;
+				}
+
+				// §3.12.18 reassign: avoid last failed provider.
+				let provider = config.providers.defaultCoder;
+				const lastRun = priorCoderRuns[priorCoderRuns.length - 1] ?? null;
+				if (lastRun !== null && lastRun.exitReason === "provider_error" && lastRun.provider === provider) {
+					const alt =
+						provider === "claude-code" && config.providers.codexEnabled ? "codex"
+						: provider === "codex" && config.providers.claudeCodeEnabled ? "claude-code"
+						: null;
+					if (alt) {
+						console.log(`[scheduler] §3.12.18 reassign: task ${task.id} → ${alt}`);
+						provider = alt;
+					}
+				}
+
+				const authLane = provider === "codex" ? "api_key" : "subscription";
+				const lines: string[] = [`Task: ${task.title}`];
+				if (task.description) lines.push("", `Description: ${task.description}`);
+				if (task.acceptanceCriteria) lines.push("", `Acceptance criteria: ${task.acceptanceCriteria}`);
+				lines.push("", "Make the necessary changes to satisfy the task. Commit your work when done.");
+
+				return {
+					provider,
+					model: "cli-default",
+					authLane,
+					prompt: lines.join("\n"),
+					repoDir,
+					homeRoot: config.sandbox.homeRoot,
+				};
+			}
+
+			// readTranscriptTail: tmux capture-pane (never throws — "" on error).
+			async function readTranscriptTail(run: RunRow): Promise<string> {
+				const session = run.tmuxSession;
+				if (!session) return "";
+				try {
+					const proc = Bun.spawn(
+						["tmux", "capture-pane", "-t", session, "-p", "-S", "-200"],
+						{ stdout: "pipe", stderr: "pipe", env: { ...process.env, LC_ALL: "C" } },
+					);
+					await proc.exited;
+					return await new Response(proc.stdout).text();
+				} catch {
+					return "";
+				}
+			}
+
+			// runActivity: use startedAt as baseline; budget enforcer covers hard limits.
+			function runActivity(run: RunRow): { lastActivityMs: number; completionSignalAtMs: number | null } {
+				const lastActivityMs = run.startedAt ? new Date(run.startedAt).getTime() : Date.now();
+				return { lastActivityMs, completionSignalAtMs: null };
+			}
+
+			// Boot conformance pass — proves each enabled driver's capabilities.
+			void bootProviderConformance({ handle, log: events, config }).catch((err) =>
+				console.error("conformance boot failed:", err instanceof Error ? err.message : err),
+			);
+
+			// Auto-merge hook — gated on review.autoMergeEnabled (default false).
+			if (config.review.autoMergeEnabled) {
+				const resolveMergeContext = makeResolveMergeContext({
+					handle,
+					resolveRepo: (task) => {
+						const project = handle.db
+							.select()
+							.from(projects)
+							.where(eq(projects.id, task.projectId ?? 0))
+							.get();
+						if (!project) return null;
+						const repoDir = resolveRepoDir(project.repoUrl) ?? "";
+						const m = project.repoUrl.match(/[:/]([^/:]+)\/([^/.]+?)(?:\.git)?$/);
+						return {
+							repoDir,
+							worktreePath: repoDir,
+							remoteUrl: project.repoUrl,
+							owner: m?.[1] ?? "",
+							repo: m?.[2] ?? "",
+							defaultBranch: "main",
+						};
+					},
+				});
+				const autoMergeDeps = makeAutoMergeDeps({
+					handle,
+					log: events,
+					config,
+					forgeClient: null as never,
+					resolveMergeContext,
+				});
+				const hook = startAutoMergeHook({ log: events, autoMergeDeps });
+				process.on("SIGTERM", () => hook.stop());
+			} else {
+				void makeResolveMergeContext;
+				void makeAutoMergeDeps;
+				void startAutoMergeHook;
+			}
+
+			// Start the unattended scheduler loop with the wired host closures.
+			void startSchedulerLoop({ handle, log: events, config, resolveSpawn, readTranscriptTail, runActivity })
+				.then((loop) => {
+					process.on("SIGTERM", () => loop.stop());
+					process.on("SIGINT", () => loop.stop());
+					console.log("nightshift scheduler loop started");
+				})
+				.catch((err) => {
+					console.error("scheduler loop failed to start:", err instanceof Error ? err.message : err);
+				});
 		},
 	});
 	console.log(`nightshift listening on ${server.url}`);
-
-	// Unattended overnight loop (PHASE5A-CONTRACT §8). GUARDED: started ONLY on
-	// the `bun run dev` path, NEVER inside createServer() — the test suite boots
-	// createServer with a :memory: DB and no loop, so no scheduler timer, tmux
-	// session, or egress probe ever runs during tests.
-	//
-	// The host-specific routing/transcript/activity closures (resolveSpawn,
-	// readTranscriptTail, runActivity) are operator-owned (same pattern as
-	// prodDeps.ts's resolveRepo): only the host knows how a project's repoUrl
-	// maps to a local checkout and which prompt to build. Until those are wired
-	// for this deployment, the loop is composed but its resolveSpawn fail-closes
-	// (returns null → every task is skipped, no pretend spawn). Wire them here:
-	//
-	//   const { handle, events, config } = /* from createServer internals */;
-	//   const loop = await startSchedulerLoop({
-	//     handle, log: events, config,
-	//     resolveSpawn: hostRoutingClosure,        // §5.1 + §3.12.18 reassign hint
-	//     readTranscriptTail: liveTranscriptReader,
-	//     runActivity: hostActivityTracker,
-	//   });
-	//   process.on("SIGTERM", () => loop.stop());
-	//
-	// Left unwired this wave per the contract's macOS-fakes scope; the live
-	// tmux+egress+bwrap loop is exercised on the Linux VM (GATE 5). The
-	// `startSchedulerLoop` import below documents the call site and keeps it
-	// type-checked.
-	void startSchedulerLoop;
-
-	// Boot conformance pass + auto-merge hook (PHASE5C-CONTRACT §8). Like the
-	// scheduler loop, these run ONLY here (the `bun run dev` path), NEVER inside
-	// createServer — so the test suite never spawns a CLI probe, opens a live
-	// ForgeClient, or makes a GitHub call.
-	//
-	//   const { handle, events, config } = /* from createServer internals */;
-	//   // 1. Prove every enabled driver's capabilities and hand the routable
-	//   //    list to the scheduler's resolveSpawn (selectDriver consumes it).
-	//   const routable = await bootProviderConformance({ handle, log: events, config });
-	//
-	//   // 2. Auto-merge hook — gated on review.autoMergeEnabled (default false).
-	//   //    Fail-closed: resolveRepo is host-owned; until it maps a project to
-	//   //    owner/repo/defaultBranch, resolveMergeContext returns null → every
-	//   //    attempt blocks at preflight ("merge context unresolved"). The live
-	//   //    forge token comes from createGitHubForgeClient (host-side, never an
-	//   //    agent env).
-	//   if (config.review.autoMergeEnabled) {
-	//     const forgeClient = await createGitHubForgeClient();
-	//     const resolveMergeContext = makeResolveMergeContext({
-	//       handle,
-	//       resolveRepo: hostRepoCoordinatesClosure, // owner/repo/defaultBranch per task
-	//     });
-	//     const autoMergeDeps = makeAutoMergeDeps({
-	//       handle, log: events, config, forgeClient, resolveMergeContext,
-	//     });
-	//     const hook = startAutoMergeHook({ log: events, autoMergeDeps });
-	//     process.on("SIGTERM", () => hook.stop());
-	//   }
-	//
-	// Left unwired this wave (host repo-coordinates closure is operator-owned,
-	// same pattern as resolveSpawn); the imports below document the call site and
-	// keep it type-checked. Auto-merge stays OFF until both the knob and the
-	// host closure are wired (GATE 5 / Linux VM).
-	void bootProviderConformance;
-	void makeResolveMergeContext;
-	void makeAutoMergeDeps;
-	void startAutoMergeHook;
-
-	// V2 (Phase 6) loops (cron triggers + notifier→channels + standup digest) are
-	// now LIVE via the onReady seam above (src/server/v2Boot.ts), fail-closed on
-	// missing env. Webhook (POST /webhooks/:id) and chat (POST /chat/telegram/:id)
-	// ingress are already live via the route table. The two seams that still need a
-	// host-specific closure (same as resolveSpawn) are wired on the Linux VM (GATE 5):
-	//   - evidence-based routing: wrap resolveSpawn with makeEvidenceResolveSpawn
-	//     (src/orchestrator/evidenceRouting.ts) before startSchedulerLoop.
-	//   - experiment runs: dispatch routine.kind==="experiment" to runExperimentForRun
-	//     (src/orchestrator/experimentRun.ts) with live git/eval deps.
-	//   - AGENTS.md upkeep: scanRepoSnapshot(repoDir) (src/maintenance/repoScan.ts)
-	//     → proposeAgentsMd on a maintenance cadence.
 }

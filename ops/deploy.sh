@@ -108,8 +108,10 @@ runuser -u "$SERVICE_USER" -- \
 
 # Apply pending Drizzle migrations. Idempotent — already-applied migrations
 # are skipped. Creates data/nightshift.db on first run.
+# PATH must include bun's bin dir because the db:migrate npm script calls `bun` by name.
 runuser -u "$SERVICE_USER" -- \
   env HOME="$SERVICE_HOME" \
+      PATH="$(dirname "$BUN_BIN"):$PATH" \
       NIGHTSHIFT_DB_PATH="$INSTALL_DIR/data/nightshift.db" \
   "$BUN_BIN" run --cwd "$INSTALL_DIR" db:migrate
 

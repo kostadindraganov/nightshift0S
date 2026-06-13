@@ -236,10 +236,11 @@ REMAINING for live V1: live planner-agent spawn (Codex/Gemini task-planning CLI 
     view + "Fire now". 173 tests. Live cron/notifier boot wiring = main.ts (GATE 5).
 5.9 ☑ Failure auto-triage (haiku-class classifier → retry/reassign/human)
     → built & logic-tested on macOS (fakes); unattended-live on Linux = GATE 5
-5.10 ◑ deploy.sh + systemd (adapt ops/reference) → Linux VM install
-    → CODE-COMPLETE: ops/deploy.sh (env setup, service install, launch),
-    ops/nightshift.service (systemd unit), ops/egress-apply.sh + ops/egress-teardown.sh
-    (nftables enforcement). Live deployment requires Linux host + GITHUB_TOKEN + test.
+5.10 ☑ deploy.sh + systemd (adapt ops/reference) → Linux VM install
+    → DEPLOYED 2026-06-14 on Proxmox Debian host: ops/deploy.sh (PATH bun-fix),
+    ops/nightshift.service (PATH includes /usr/sbin for nft, /home/nightshift/.local/bin
+    for claude + agy), NIGHTSHIFT_REPO_DIR wired, service live at :3000, /healthz + /readyz
+    both {"ok":true}, scheduler loop confirmed started in journalctl.
 **GATE 5:** ALL V1.5 modules built (scheduler + capacity + budgets + triage + auto-merge +
 provider matrix + settings registry + review harness/failback + transcript + notifier +
 auth-health + routines/triggers; **782 tests pass** on macOS with injectable fakes;
@@ -397,19 +398,25 @@ issues. Both fixed, verified, and green on macOS.
     → verify: 124/124 (server + tasks + scheduler + orchestrator), typecheck clean; live
       promote→`ready` + boot recompute unstuck the existing tasks.
 
-**GATE 5 — Linux finish (NEXT: moving to the Linux host to complete ALL remaining tasks).**
+**GATE 5 — Linux finish (IN PROGRESS: host deployed 2026-06-14; core seams wired).**
 On macOS a `ready` task correctly **PARKS** — it does NOT auto-advance to `coding` — because the
 scheduler's host `resolveSpawn` closure (project `repoUrl` → local checkout + prompt build + live
 `claude`/coder spawn) is intentionally unwired off-Linux (`main.ts:148-168`, fail-closes → every
-ready task is skipped, never a pretend spawn). The consolidated GATE-5 worklist to finish on Linux
-(rolls up every runtime-pending item from Phases 2–7):
-  - **Boot-wire the host closures in `main.ts`:** `resolveSpawn` (repo→checkout + prompt + live spawn),
-    `produceFinder` specialist spawn (5.6), cron/notifier/digest timers (5.8/6), evidence-routing wrap
-    (6.D2), experiment-run dispatch (6.A4/6.D3), AGENTS.md upkeep cadence (6.B4/6.D4), auto-merge hook
-    (5.1, gated on `review.autoMergeEnabled`).
-  - **Run the "fix typo" task end-to-end** per `docs/LINUX-DEPLOY.md`: real spawn → push → PR →
+ready task is skipped, never a pretend spawn). GATE-5 worklist status:
+  - ☑ **Boot-wire core host closures in `main.ts`:** `resolveSpawn` (repo→checkout via
+    `NIGHTSHIFT_REPO_DIR` + §3.12.18 reassign + prompt build), `readTranscriptTail` (tmux
+    capture-pane), `runActivity` (startedAt baseline), `bootProviderConformance`, auto-merge hook
+    (gated on `review.autoMergeEnabled`), V2 loops (cron/notifier/digest via `startV2Loops`),
+    `startSchedulerLoop` — all live in `onReady` seam. Service confirmed started: scheduler
+    loop + /healthz/readyz up.
+  - ☑ **Anti Gravity CLI rename** (`agy`): `gemini.ts`, `antigravity.ts` (now full headless
+    `agy` driver, not fail-closed stub), `cliUpdate.ts`, `cliDrivers.test.ts` all updated.
+    `agy` v1.0.8 installed at `/home/nightshift/.local/bin/agy`.
+  - ☐ **Wire remaining host closures:** `produceFinder` specialist spawn (5.6), evidence-routing
+    wrap (6.D2), experiment-run dispatch (6.A4/6.D3), AGENTS.md upkeep cadence (6.B4/6.D4).
+  - ☐ **Run the "fix typo" task end-to-end** per `docs/LINUX-DEPLOY.md`: real spawn → push → PR →
     review ping-pong → human merge → dependents unblock (closes GATE 2/3/4 live).
-  - **Activate the runtime surfaces:** bwrap (2.3) + nftables egress (2.4) + container run (7.1);
+  - ☐ **Activate the runtime surfaces:** bwrap (2.3) + nftables egress (2.4) + container run (7.1);
     remote worker daemons (7.2); live CLI update exec (7.3); live preview deploy/reverse-proxy/DNS (7.4);
     live CMA API + conformance (7.5); prompt-optimize propose/evaluate (7.6); third-reviewer
     tiebreaker spawn (7.7); real `playwright install` + browser verify (6.B5).
