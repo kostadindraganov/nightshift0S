@@ -16,7 +16,11 @@ import type { DbHandle } from "../db/client.ts";
 import type { TaskState } from "../db/columns.ts";
 import type { EventLog } from "../events/events.ts";
 import { configRoutes } from "../config/settingsRoutes.ts";
+import { settingsRegistryRoutes } from "../config/registryRoutes.ts";
 import { runRoutes } from "../runs/runRoutes.ts";
+import { transcriptRoutes } from "../runs/transcriptRoutes.ts";
+import { authHealthRoutes } from "../providers/authHealthRoutes.ts";
+import { triggerRoutes } from "../triggers/triggerRoutes.ts";
 import { makeReviewRoutes, type ReviewRoutesConfig } from "./reviewRoutes.ts";
 import { makePlannerRoutes, type PlannerRoutesConfig } from "./plannerRoutes.ts";
 import type { ReviewDeps } from "../orchestrator/review.ts";
@@ -617,10 +621,18 @@ export const routes: Route[] = [
 			});
 		},
 	},
-	// -- config (read-only registry) -------------------------------------------
+	// -- config (read-only file/env registry) ----------------------------------
 	...configRoutes,
+	// -- editable scoped settings registry + audit (5.2, §3.12.19) -------------
+	...settingsRegistryRoutes,
 	// -- runs ------------------------------------------------------------------
 	...runRoutes,
+	// -- transcript browser (events-only, 5.8, §3.12.16) -----------------------
+	...transcriptRoutes,
+	// -- provider auth health panel (5.8, §3.9) --------------------------------
+	...authHealthRoutes,
+	// -- routines + manual/cron triggers w/ authz (5.8, §3.2/§3.12.6) ----------
+	...triggerRoutes,
 	// -- review (thread / findings / review-round / verdict) -------------------
 	...makeReviewRoutes({ buildDeps: buildReviewDeps }),
 	// -- planner (project bootstrap) -------------------------------------------

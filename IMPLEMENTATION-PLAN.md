@@ -1,13 +1,24 @@
 # Nightshift — Implementation Plan
 
-Status: 2026-06-10. Blueprint APPROVED (3-round Codex review). Step 0 done.
-**Resume point: live GATE 2 on the Linux deploy host.** Phase 1 done (GATE 1 ✓);
-Phase 2 services 2.1–2.7 + the GATE 2 orchestrator all built & logic-tested on
-macOS (356 tests). What remains is RUNTIME/NETWORK verification on the Linux
-host + live GitHub: stand up the live launcher/forge/CI clients and run the
-"fix typo" task end-to-end (real claude-code spawn → push → PR → human merge →
-dependents unblock). Also pending: 2.4 nftables enforcement, 2.6 live push/PR,
-2.7 live CI fetch, and the **xterm.js live-attach UI** (not built).
+Status: 2026-06-13 (origin/main @ a7d4b76 + uncommitted Phase-5-finish wave). Blueprint
+APPROVED. Step 0 done.
+**Resume point: live runtime-verify on the Linux deploy host (GATE 5). ALL Phase 5
+tasks are now built & logic-tested on macOS.**
+Phases 0–4 DONE on macOS (GATE 1 ✓; GATE 2/3/4 ◑ = built & logic-tested with
+scripted agents/injected fakes + real git/DB). Phase 5: **5.1–5.9 done** (5.2 / 5.6 /
+5.8 closed this wave) + 5.10 code-complete. The whole
+live/Linux wiring is CODE-COMPLETE: real reviewer/coder/planner spawn
+(`src/runs/liveSpawn.ts`, coder `--resume`), host-side GitHub forge+CI clients
+(`src/forge/githubForgeClient.ts`, `src/gate/githubCiClient.ts`,
+`src/orchestrator/prodDeps.ts`), auto-merge preflight (`src/forge/preflight.ts`),
+egress apply (`src/egress/apply.ts` + `ops/egress-*.sh`), xterm.js terminal
+(`src/server/terminalRoutes.ts` + `web/components/terminal/`), and deploy
+(`ops/deploy.sh` + `ops/nightshift.service`). **782 tests pass; typecheck clean.**
+NOTE: run the suite with `bun run test` (the curated dir list) — bare `bun test`
+discovers vendored/e2e files that HANG. What REMAINS is RUNTIME/NETWORK verification
+on Linux + live GitHub — run the "fix typo" task end-to-end per **`docs/LINUX-DEPLOY.md`**
+(real spawn → push → PR → review → human merge → dependents unblock) plus
+nftables/bwrap activation, plus boot-wiring the cron/notifier timers in main.ts.
 Specs that bind every task below:
 `docs/BLUEPRINT.md` (§3.12 overrides), `docs/SPEC-STATE-MACHINES.md`,
 `docs/SPEC-SCHEMA.md`, `docs/THREAT-MODEL.md`, `REUSE.md`.
@@ -41,6 +52,8 @@ gate passes. ☐ open ☑ done
     SPEC-STATE-MACHINES §6) + dependency table with BFS cycle check
     (port from `ui-reference/features.ts`)
     → verify: illegal-transition test matrix (every from→to pair).
+    (2026-06-13: fixed the 400-vs-409 code — an illegal edge to `done` now
+    returns 409 illegal_transition; the merge_sha guard fires AFTER legality.)
 1.6 ☑ Design tokens (`web/design-tokens.json` + `web/styles/tokens.css`) +
     Bun-fullstack React app shell (`web/`) + minimal kanban board reading
     live SSE from the event stream (drag-drop enforces the transition law).
@@ -93,10 +106,11 @@ Typecheck clean; 70/70 tests pass.
     runRoutes.ts), watchdog ADR-0019 (watchdog.ts), reap order + boot
     reconciliation (reap.ts).
     → CODE-COMPLETE — Linux runtime-verify pending: ☑ scripted task completes;
-    ☑ kill/crash/orphan reconciliation passes (260 tests). Live claude-code spawn,
-    session --resume wiring, and xterm.js live-attach terminal require ops/deploy.sh
-    + Linux host + browser. NOTE: 1 low-freq flaky test (crypto-random suffix collision)
-    to harden separately.
+    ☑ kill/crash/orphan reconciliation passes. Live claude-code spawn, session
+    `--resume` wiring (`liveSpawn.ts`), and xterm.js live-attach terminal
+    (`terminalRoutes.ts`) are now WIRED — only real-tmux/browser verification on
+    the Linux host remains. NOTE: the low-freq flaky test (crypto-random suffix
+    collision) was FIXED 2026-06-13 (suffix entropy 24→64 bits).
 2.6 ◑ Forge service (`src/forge/`, host-side, worktree-distrusting §3.12.25):
     worktree-distrust push builder (explicit remote, core.hooksPath=/dev/null,
     --no-verify, local/global config nulled), ref validation, secret-scan diff
@@ -145,9 +159,10 @@ requires ops/deploy.sh + GITHUB_TOKEN + Linux host.
 thread service (`src/thread/`), verdict engine (`src/review/{judge,engine,verdict}`),
 findings anchoring, resolution lifecycle, injection-safe prompt rendering, and task
 detail UI (TaskDetailView + ThreadView + VerdictPanel + FindingsPanel). Verified on
-macOS with scripted review runs + injected fakes (judge): 385 tests pass. DEPLOY-PENDING:
-live reviewer-CLI spawn under tmux (Codex/Gemini reviewer invoke), xterm.js live-attach
-UI (WebSocket terminal stream), live PR diff fetch on the Linux host.
+macOS with scripted review runs + injected fakes (judge): 385 tests pass. CODE-COMPLETE
+since the live-wiring pass (`liveSpawn.ts` reviewer spawn, `terminalRoutes.ts` xterm.js
+WebSocket stream, live PR diff fetch) — RUNTIME-VERIFY pending on the Linux host:
+real Codex/Gemini reviewer-CLI under tmux + browser xterm attach.
 
 ## Phase 4 — Planner + intake
 4.1 ☑ Planner agent (API driver, structured output): plan text → tasks with
@@ -170,7 +185,14 @@ REMAINING for live V1: live planner-agent spawn (Codex/Gemini task-planning CLI 
     trusted check apps, fresh SHA, no bypass perms, every time
     → built & logic-tested on macOS (fakes/injected clients); live merge + live
     CLI/endpoint probes on Linux/real-GitHub = GATE 5
-5.2 ☐ Editable scoped settings registry + audit events (§3.12.19)
+5.2 ☑ Editable scoped settings registry + audit events (§3.12.19)
+    → typed REGISTRY of editable knobs (3 scopes global/project/routine),
+    fail-closed putSetting (unknown_key/wrong_scope/scope_id_required/invalid_value),
+    upsert-by-select for global nulls, resolveEffectiveConfig layering
+    (default<file<env<db:global<db:project<db:routine) with provenance, audit via
+    global events (`settings.updated`/`.reverted`, NEVER secret values), editable UI
+    + auth-health panel + audit trail. `src/config/registry.ts` + registryRoutes
+    (GET/PUT/DELETE /settings, /settings/registry, /settings/audit). 27 tests.
 5.3 ☑ Parallel slots: atomic claiming, slot-filling scheduler (§3.7.1)
     → built & logic-tested on macOS (fakes); unattended-live on Linux = GATE 5
 5.4 ☑ Provider matrix: gemini-cli, antigravity, opencode CLI drivers +
@@ -180,21 +202,50 @@ REMAINING for live V1: live planner-agent spawn (Codex/Gemini task-planning CLI 
 5.5 ☑ Subscription capacity pools (§3.12.14): observed 429/auth signals,
     cooldowns, concurrency caps; overflow policy subscription→api_key
     → built & logic-tested on macOS (fakes); unattended-live on Linux = GATE 5
-5.6 ☐ Risk tiers + specialist reviewers + coordinator (§3.4); circuit
+5.6 ☑ Risk tiers + specialist reviewers + coordinator (§3.4); circuit
     breakers with failback-vs-routing policy split (§3.12.18)
+    → §3.4 review harness as an ADDITIVE injectable pipeline (existing single-judge
+    path untouched): `src/review/{riskTier,specialists,coordinator,harness}.ts` —
+    noiseFilter (keeps migrations, drops lockfiles/minified/generated), risk tier
+    (declaredTier floor + security-forces-full), 6 injection-safe specialist finders
+    run IN PARALLEL (recall-first), coordinator dedup + adversarial-verify of
+    low-confidence + approval-biased rubric, FAIL-CLOSED (all-finders-fail ⇒ never
+    approve). `toVerdictShape` feeds the existing orchestrator unchanged. Failback ≠
+    routing (§3.12.18): `src/providers/failback.ts` — classifyFailure, MODEL_FAMILIES,
+    ALLOWED_TRANSITIONS table, within-vendor failback (never cross-vendor; auth/
+    context_overflow/rate_limit ⇒ stop), routingDecision avoids prior failed providers.
+    Circuit-breaker STATE stays owned by capacity.ts. 127 tests. (Security bugfix
+    shipped: specialist prompts now sanitize against the finder's OWN extraction tag.)
+    Live specialist spawn (deps.produceFinder) = Linux/GATE 5.
 5.7 ☑ Budgets: hard wall-clock universal, token/$ advisory where priced
     → built & logic-tested on macOS (fakes); unattended-live on Linux = GATE 5
-5.8 ☐ Transcript browser (events-only); notifier + Telegram channel;
+5.8 ☑ Transcript browser (events-only); notifier + Telegram channel;
     auth health panel; routines + manual/cron triggers w/ authz
+    → transcript (§3.12.16): `src/runs/transcript.ts` normalized observable-events
+    envelope merging events+thread_events per run/task (redacted rows stay redacted),
+    GET /runs/:id/transcript + /tasks/:id/transcript. Notifier (§3.10 item 4):
+    `src/notify/{notifier,telegram}.ts` — ONE interface, per-event-type routing,
+    channel-failure isolation, tail-only event bridge; Telegram fail-closed when
+    unconfigured (no HTTP, token NEVER in any reason/log), injected HttpSend.
+    Auth health (§3.9): `src/providers/authHealth.ts` status derivation
+    (healthy/degraded/cooling_down/circuit_open/disabled/unproven) + GET /providers/health
+    + UI panel. Routines+triggers (§3.2/§3.12.6): `src/triggers/{routines,triggers,cron}.ts`
+    — routine+trigger CRUD, standard 5-field cron evaluator, fireTrigger with authz
+    (allowlist/rate-limit/dedupe/dry-run-pending for external sources), creates a
+    backlog task w/ routineId provenance; startTriggerScheduler for cron. Routines UI
+    view + "Fire now". 173 tests. Live cron/notifier boot wiring = main.ts (GATE 5).
 5.9 ☑ Failure auto-triage (haiku-class classifier → retry/reassign/human)
     → built & logic-tested on macOS (fakes); unattended-live on Linux = GATE 5
 5.10 ◑ deploy.sh + systemd (adapt ops/reference) → Linux VM install
     → CODE-COMPLETE: ops/deploy.sh (env setup, service install, launch),
     ops/nightshift.service (systemd unit), ops/egress-apply.sh + ops/egress-teardown.sh
     (nftables enforcement). Live deployment requires Linux host + GITHUB_TOKEN + test.
-**GATE 5:** core built (scheduler + capacity + budgets + triage + auto-merge + provider
-matrix modules; 454 tests pass on macOS with injectable fakes). Factory unattended-live
-overnight on Linux host = pending; morning digest shows merged PRs.
+**GATE 5:** ALL V1.5 modules built (scheduler + capacity + budgets + triage + auto-merge +
+provider matrix + settings registry + review harness/failback + transcript + notifier +
+auth-health + routines/triggers; **782 tests pass** on macOS with injectable fakes;
+typecheck clean). Factory unattended-live overnight on Linux host = pending: boot-wire the
+live seams (resolveSpawn, produceFinder specialist spawn, cron/notifier timers in main.ts,
+Telegram HttpSend), then verify the morning digest shows merged PRs.
 
 ## Phase 6 — V2 (listed; spec in BLUEPRINT §4 step 6)
 Webhook/chat triggers, Playwright verification (opt-in), per-project agent

@@ -1,7 +1,20 @@
 // HTTP client for the Nightshift API.
 // All requests are same-origin; the server is expected to serve both the SPA
 // and the API.  Request bodies use snake_case; responses are camelCase.
-import type { Task, Project, NightshiftEvent, ConfigEntry, ThreadEvent, Finding } from "./types.ts";
+import type {
+  Task,
+  Project,
+  NightshiftEvent,
+  ConfigEntry,
+  ThreadEvent,
+  Finding,
+  SettingsRegistryEntry,
+  SettingsResponse,
+  ProviderHealth,
+  Routine,
+  Trigger,
+  TranscriptEvent,
+} from "./types.ts";
 
 // ── Token helpers ────────────────────────────────────────────
 const TOKEN_KEY = "nightshift_token";
@@ -200,4 +213,132 @@ export function bootstrapProject(
     `/projects/${projectId}/bootstrap`,
     { method: "POST", body: JSON.stringify({ description }) },
   );
+}
+
+// ── Editable settings registry (5.2, §3.12.19) ─────────────────
+export function getSettingsRegistry(): Promise<SettingsRegistryEntry[]> {
+  return apiFetch<SettingsRegistryEntry[]>("/settings/registry");
+}
+
+export function getSettings(params?: {
+  project_id?: number;
+  routine_id?: number;
+}): Promise<SettingsResponse> {
+  const qs = params
+    ? "?" +
+      new URLSearchParams(
+        Object.entries(params)
+          .filter(([, v]) => v !== undefined)
+          .map(([k, v]) => [k, String(v)]),
+      ).toString()
+    : "";
+  return apiFetch<SettingsResponse>(`/settings${qs}`);
+}
+
+export function putSetting(
+  scope: string,
+  key: string,
+  body: { value: unknown; scope_id?: number; updated_by?: string },
+): Promise<unknown> {
+  return apiFetch<unknown>(`/settings/${scope}/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteSetting(
+  scope: string,
+  key: string,
+  scopeId?: number,
+): Promise<{ ok: boolean }> {
+  const qs = scopeId !== undefined ? `?scope_id=${scopeId}` : "";
+  return apiFetch<{ ok: boolean }>(
+    `/settings/${scope}/${encodeURIComponent(key)}${qs}`,
+    { method: "DELETE" },
+  );
+}
+
+export function getSettingsAudit(limit?: number): Promise<NightshiftEvent[]> {
+  const qs = limit !== undefined ? `?limit=${limit}` : "";
+  return apiFetch<NightshiftEvent[]>(`/settings/audit${qs}`);
+}
+
+// ── Provider auth health (5.8, §3.9) ───────────────────────────
+export function getProvidersHealth(): Promise<ProviderHealth[]> {
+  return apiFetch<ProviderHealth[]>("/providers/health");
+}
+
+// ── Routines + triggers (5.8, §3.2/§3.12.6) ────────────────────
+export function listRoutines(params?: {
+  project_id?: number;
+  kind?: string;
+}): Promise<Routine[]> {
+  const qs = params
+    ? "?" +
+      new URLSearchParams(
+        Object.entries(params)
+          .filter(([, v]) => v !== undefined)
+          .map(([k, v]) => [k, String(v)]),
+      ).toString()
+    : "";
+  return apiFetch<Routine[]>(`/routines${qs}`);
+}
+
+export function createRoutine(body: Record<string, unknown>): Promise<Routine> {
+  return apiFetch<Routine>("/routines", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteRoutine(id: number): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/routines/${id}`, { method: "DELETE" });
+}
+
+export function listTriggers(params?: {
+  routine_id?: number;
+}): Promise<Trigger[]> {
+  const qs = params?.routine_id !== undefined ? `?routine_id=${params.routine_id}` : "";
+  return apiFetch<Trigger[]>(`/triggers${qs}`);
+}
+
+export function createTrigger(body: Record<string, unknown>): Promise<Trigger> {
+  return apiFetch<Trigger>("/triggers", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteTrigger(id: number): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/triggers/${id}`, { method: "DELETE" });
+}
+
+export function fireTrigger(
+  id: number,
+  body?: { actor?: string; dedupe_key?: string },
+): Promise<{ ok: boolean; task_id?: number }> {
+  return apiFetch<{ ok: boolean; task_id?: number }>(`/triggers/${id}/fire`, {
+    method: "POST",
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
+// ── Transcript browser (5.8, §3.12.16) ─────────────────────────
+export function getTaskTranscript(
+  taskId: number,
+  params?: { round?: number; after_seq?: number; limit?: number },
+): Promise<TranscriptEvent[]> {
+  const qs = params
+    ? "?" +
+      new URLSearchParams(
+        Object.entries(params)
+          .filter(([, v]) => v !== undefined)
+          .map(([k, v]) => [k, String(v)]),
+      ).toString()
+    : "";
+  return apiFetch<TranscriptEvent[]>(`/tasks/${taskId}/transcript${qs}`);
+}
+
+export function getRunTranscript(runId: number): Promise<TranscriptEvent[]> {
+  return apiFetch<TranscriptEvent[]>(`/runs/${runId}/transcript`);
 }

@@ -110,3 +110,98 @@ export interface Verdict {
   summary: string;
   findings: unknown[]; // payload-embedded; render from Finding rows instead
 }
+
+// ── Editable settings registry (5.2, §3.12.19) ─────────────────
+/** One editable knob definition from GET /settings/registry. */
+export interface SettingsRegistryEntry {
+  key: string;
+  configPath: string;
+  type: "number" | "boolean" | "string" | "stringArray";
+  scopes: string[];
+  secret: boolean;
+  default: unknown;
+}
+
+/** One effective config leaf from GET /settings (post layering). */
+export interface EffectiveSetting {
+  path: string;
+  value: unknown;
+  source: string; // default | file | env | db:global | db:project | db:routine
+}
+
+/** A scoped override row (secret values masked). */
+export interface SettingOverride {
+  id: number;
+  scope: string;
+  scopeId: number | null;
+  key: string;
+  valueJson: string;
+  valueMasked: boolean;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface SettingsResponse {
+  entries: EffectiveSetting[];
+  overrides: SettingOverride[];
+}
+
+// ── Provider auth health (5.8, §3.9) ───────────────────────────
+export interface ProviderHealth {
+  name: string;
+  kind: string;
+  authMode: string;
+  enabled: boolean;
+  circuitState: string;
+  cooldownUntil: string | null;
+  cooldownActive: boolean;
+  lastError: string | null;
+  capabilitiesProven: boolean;
+  status:
+    | "healthy"
+    | "degraded"
+    | "cooling_down"
+    | "circuit_open"
+    | "disabled"
+    | "unproven";
+}
+
+// ── Routines + triggers (5.8, §3.2/§3.12.6) ────────────────────
+export interface Routine {
+  id: number;
+  projectId: number | null;
+  name: string;
+  kind: "task" | "experiment";
+  promptName: string;
+  paramsJson: string | null;
+  providerPref: string | null;
+  rubric: string | null;
+  budgetJson: string | null;
+  reviewPolicy: "full" | "light" | "none";
+  enabled: boolean;
+}
+
+export interface Trigger {
+  id: number;
+  routineId: number;
+  kind: "manual" | "cron" | "webhook" | "chat";
+  schedule: string | null;
+  authzJson: string | null;
+  dryRunDefault: boolean;
+  enabled: boolean;
+  lastFiredAt: string | null;
+}
+
+// ── Transcript browser (5.8, §3.12.16) ─────────────────────────
+export interface TranscriptEvent {
+  seq: number;
+  ts: string;
+  source: "event" | "thread";
+  kind: string;
+  actor?: string;
+  runId?: number | null;
+  round?: number | null;
+  idempotencyKey?: string | null;
+  redacted?: boolean;
+  payload: unknown;
+}
