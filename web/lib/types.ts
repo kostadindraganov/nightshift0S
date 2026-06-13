@@ -192,6 +192,38 @@ export interface Trigger {
   lastFiredAt: string | null;
 }
 
+// ── Analytics + evidence-based routing (Phase 6, §3.7) ─────────
+export interface ProviderStat {
+  provider: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  successRate: number;
+  avgDurationMs: number | null;
+  totalCostUsd: number;
+  pricedRuns: number;
+  topExitReasons: { reason: string; count: number }[];
+}
+
+export interface FactoryOverview {
+  tasksByState: Record<string, number>;
+  runsByState: Record<string, number>;
+  totalCostUsd: number;
+  activeRuns: number;
+}
+
+export interface RoutingScore {
+  provider: string;
+  score: number;
+  reason: string;
+}
+
+export interface AnalyticsResponse {
+  overview: FactoryOverview;
+  providers: ProviderStat[];
+  routing: RoutingScore[];
+}
+
 // ── Transcript browser (5.8, §3.12.16) ─────────────────────────
 export interface TranscriptEvent {
   seq: number;

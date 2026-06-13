@@ -286,11 +286,24 @@ Telegram HttpSend), then verify the morning digest shows merged PRs.
     adapter (fail-closed when absent — real browser install = GATE 5), fail-closed verdicts
     (unrunnable ⇒ fail, never pass). 11 tests.
 
-**Phase 6 remaining ☐:** spec-first / plan-review flow; experiment ledger UI (timeline +
-metric chart — ships when live experiment runs exist); real `playwright install` + live
-browser verify (GATE 5); main.ts boot-wiring of the live V2 seams (channels/digest/experiment
-loop, chat/webhook receivers, evidence-routing into resolveSpawn, live repo scan for AGENTS.md);
-UI for memory/analytics/routines/transcript panels. These are GATE-5/runtime or UI polish.
+**Batch C DONE ☑ (2026-06-13, built & logic-tested on macOS; typecheck clean):**
+6.C1 ☑ Spec-first / plan-review flow (§3.10.1) — `src/review/planReviewJudge.ts` (the 4th
+    judge plug-in: reviews a PLAN against acceptance criteria before coding, injection-safe,
+    fail-closed, same Verdict contract) + `src/orchestrator/planReview.ts` (advisory
+    verdict-loop round recording to the thread; injectable, never auto-approves). Minimal
+    tests (4) per the owner's "fewer tests" directive.
+6.C2 ☑ Analytics dashboard UI (§3.7) — `web/views/AnalyticsView.tsx` (factory overview +
+    per-provider success/cost/latency table + routing scores), new "Analytics" nav item +
+    `getAnalytics` api helper.
+6.C3 ☑ main.ts V2 boot-wiring documented — the cron-trigger scheduler, notifier→channels
+    bridge, and standup-digest poller are composed call-sites under `import.meta.main`
+    (`void`-referenced, never inside createServer), ready for the operator to wire on Linux.
+
+**Phase 6 remaining ☐ (all GATE-5/runtime or pure UI polish):** experiment ledger UI
+(timeline + metric chart — ships when live experiment runs exist); real `playwright install`
++ live browser verify; live host-closure wiring on the Linux VM (resolveSpawn evidence
+routing, cron/notifier/digest activation, experiment-loop per run, live repo scan for
+AGENTS.md, Telegram/Slack/email transports); optional memory/transcript UI panels.
 
 ## Phase 7 — V3
 Container isolation per run, multi-VM workers, CLI auto-update,

@@ -14,6 +14,7 @@ import type {
   Routine,
   Trigger,
   TranscriptEvent,
+  AnalyticsResponse,
 } from "./types.ts";
 
 // ── Token helpers ────────────────────────────────────────────
@@ -341,4 +342,20 @@ export function getTaskTranscript(
 
 export function getRunTranscript(runId: number): Promise<TranscriptEvent[]> {
   return apiFetch<TranscriptEvent[]>(`/runs/${runId}/transcript`);
+}
+
+// ── Analytics + evidence-based routing (Phase 6, §3.7) ─────────
+export function getAnalytics(params?: {
+  since?: string;
+  kind?: string;
+}): Promise<AnalyticsResponse> {
+  const qs = params
+    ? "?" +
+      new URLSearchParams(
+        Object.entries(params)
+          .filter(([, v]) => v !== undefined)
+          .map(([k, v]) => [k, String(v)]),
+      ).toString()
+    : "";
+  return apiFetch<AnalyticsResponse>(`/analytics${qs}`);
 }

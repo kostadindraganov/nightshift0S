@@ -29,6 +29,10 @@ import {
 	handleTermUpgrade,
 	type TermSocketData,
 } from "./terminalRoutes.ts";
+// V2 (Phase 6) boot seams — documented call sites, wired live on the Linux host.
+import { startTriggerScheduler } from "../triggers/triggers.ts";
+import { makeEventBridge } from "../notify/notifier.ts";
+import { makeDigestScheduler } from "../notify/digest.ts";
 
 export const DEFAULT_PORT = 3000;
 
@@ -165,4 +169,35 @@ if (import.meta.main) {
 	void makeResolveMergeContext;
 	void makeAutoMergeDeps;
 	void startAutoMergeHook;
+
+	// V2 (Phase 6) boot seams — same GUARDED pattern: composed here, NEVER inside
+	// createServer (the test suite must not start a cron tick, an event-bridge
+	// subscription, or a digest poller). All are inert until the operator wires
+	// the host-specific closures on the Linux VM (GATE 5):
+	//
+	//   const { handle, events, config } = /* from createServer internals */;
+	//   // 1. Cron triggers (§3.2): fire due routine triggers on an interval.
+	//   const cron = startTriggerScheduler({ handle, log: events }, { intervalMs: 60_000 });
+	//   // 2. Notifier → channels (§3.10.4): Telegram/Slack/email behind one bridge.
+	//   const channels = [
+	//     makeTelegramChannel({ botTokenRef: () => process.env.TELEGRAM_BOT_TOKEN,
+	//       chatId: process.env.TELEGRAM_CHAT_ID, send: fetchHttpSend }),
+	//     // makeSlackChannel({ webhookUrlRef: () => process.env.SLACK_WEBHOOK_URL, send: fetchHttpSend }),
+	//   ];
+	//   const notifier = new Notifier({ channels });
+	//   const bridge = makeEventBridge({ handle, log: events, notifier,
+	//     interestingKinds: DEFAULT_INTERESTING_KINDS, mapEvent: defaultMapEvent });
+	//   // 3. Standup digest (§3.5): periodic done/blocked/spend/flaky rollup.
+	//   const digest = makeDigestScheduler({ handle, notifier, now: () => new Date(),
+	//     intervalMs: 8*3600*1000, sinceWindowMs: 8*3600*1000 });
+	//   process.on("SIGTERM", () => { cron.stop(); bridge.stop(); digest.stop(); });
+	//
+	// Webhook (POST /webhooks/:id) and chat (POST /chat/telegram/:id) ingress are
+	// already LIVE via the route table — they need no boot timer. Evidence-based
+	// routing (src/analytics/routing.ts) plugs into the scheduler's resolveSpawn,
+	// and the experiment loop (src/experiment/engine.ts) runs per claimed
+	// kind="experiment" run — both host-closure wiring, same as resolveSpawn above.
+	void startTriggerScheduler;
+	void makeEventBridge;
+	void makeDigestScheduler;
 }
