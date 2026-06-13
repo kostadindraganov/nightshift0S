@@ -299,11 +299,26 @@ Telegram HttpSend), then verify the morning digest shows merged PRs.
     bridge, and standup-digest poller are composed call-sites under `import.meta.main`
     (`void`-referenced, never inside createServer), ready for the operator to wire on Linux.
 
-**Phase 6 remaining ☐ (all GATE-5/runtime or pure UI polish):** experiment ledger UI
-(timeline + metric chart — ships when live experiment runs exist); real `playwright install`
-+ live browser verify; live host-closure wiring on the Linux VM (resolveSpawn evidence
-routing, cron/notifier/digest activation, experiment-loop per run, live repo scan for
-AGENTS.md, Telegram/Slack/email transports); optional memory/transcript UI panels.
+**Batch D DONE ☑ (2026-06-13, live-wiring CODE-COMPLETE on macOS; typecheck clean):**
+6.D1 ☑ Notifier transports + V2 boot composer — `src/notify/transports.ts` (fetchHttpSend
+    for Telegram/Slack; unconfiguredEmailSend fail-closed default) + `src/server/v2Boot.ts`
+    `startV2Loops` (cron-trigger scheduler + env-built channels + event bridge + standup
+    digest, each guarded/inert when unconfigured). **Now LIVE-wired in main.ts** via the new
+    `createServer({onReady})` seam (runs only on `bun run dev`/Linux, never under test).
+6.D2 ☑ Evidence-based routing closure — `src/orchestrator/evidenceRouting.ts`
+    (chooseProviderByEvidence + makeEvidenceResolveSpawn wrapper, cold-start fail-safe,
+    fail-closed to base plan). Wraps resolveSpawn on the Linux host.
+6.D3 ☑ Experiment-run orchestration hook — `src/orchestrator/experimentRun.ts`
+    (runExperimentForRun + makeFailClosedExperimentDeps; eval on read-only checkout §3.12.8).
+6.D4 ☑ AGENTS.md host repo scanner — `src/maintenance/repoScan.ts` (scanRepoSnapshot, fail-soft).
+6.D5 ☑ UI — `web/views/{AnalyticsView,MemoryView,ExperimentView}.tsx` + nav tabs (the §3.11
+    experiment ledger timeline+chart "progress.png" view is now in the UI). 7 nav tabs total.
+
+**Phase 6 remaining ☐ — GATE-5 only (physically not validatable on macOS):** real `playwright
+install` + live browser verify; the live host closures the Linux VM supplies (resolveSpawn
+repo→checkout mapping, real git/eval/agent for experiment runs, a live EmailSend transport);
+optional transcript tab in TaskDetailView. Everything code-able on the dev host is built,
+green, and wired; what is left needs the Linux runtime + real provider/GitHub/browser surfaces.
 
 ## Phase 7 — V3
 Container isolation per run, multi-VM workers, CLI auto-update,

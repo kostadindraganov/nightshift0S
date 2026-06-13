@@ -10,7 +10,7 @@
  */
 
 import index from "../../web/index.html";
-import { openDatabase } from "../db/client.ts";
+import { openDatabase, type DbHandle } from "../db/client.ts";
 import { runMigrations } from "../db/migrate.ts";
 import { EventLog } from "../events/events.ts";
 import { ValidationError } from "../tasks/tasks.ts";
@@ -29,10 +29,10 @@ import {
 	handleTermUpgrade,
 	type TermSocketData,
 } from "./terminalRoutes.ts";
-// V2 (Phase 6) boot seams — documented call sites, wired live on the Linux host.
-import { startTriggerScheduler } from "../triggers/triggers.ts";
-import { makeEventBridge } from "../notify/notifier.ts";
-import { makeDigestScheduler } from "../notify/digest.ts";
+// V2 (Phase 6) live background loops — started via createServer's onReady seam.
+import { startV2Loops } from "./v2Boot.ts";
+import { fetchHttpSend } from "../notify/transports.ts";
+import { loadConfig } from "../config/config.ts";
 
 export const DEFAULT_PORT = 3000;
 
@@ -43,6 +43,14 @@ export interface CreateServerOptions {
 	dbPath?: string;
 	/** When true, enables Bun HMR + console forwarding for the bundled SPA. */
 	dev?: boolean;
+	/**
+	 * Called once with the server's shared DB handle + event log AFTER migrations,
+	 * BEFORE listening. The `bun run dev` / Linux path uses it to start the live
+	 * background loops (scheduler, V2 cron/notifier/digest) that need the SAME
+	 * handle + EventLog the request handlers use. The test suite never passes it,
+	 * so createServer stays side-effect-free under test (no timers, no spawn).
+	 */
+	onReady?: (deps: { handle: DbHandle; events: EventLog }) => void;
 }
 
 export function createServer(options: CreateServerOptions = {}): Bun.Server<TermSocketData> {
@@ -52,6 +60,9 @@ export function createServer(options: CreateServerOptions = {}): Bun.Server<Term
 	runMigrations(handle);
 	// One event log per server — the write-through emitter AND the SSE source.
 	const events = new EventLog(handle);
+
+	// Live-loop wiring seam (dev/Linux only; never passed under test).
+	options.onReady?.({ handle, events });
 
 	return Bun.serve<TermSocketData>({
 		port,
@@ -102,7 +113,31 @@ export function createServer(options: CreateServerOptions = {}): Bun.Server<Term
 }
 
 if (import.meta.main) {
-	const server = createServer({ dev: true });
+	// V2 (Phase 6) live loops are started via onReady — it runs ONLY on this
+	// `bun run dev`/Linux path (the test suite never passes onReady), sharing the
+	// server's DB handle + EventLog. startV2Loops is fully fail-closed: with no
+	// TELEGRAM_*/SLACK_* env it builds zero channels (cron fires nothing harmful),
+	// so this is safe to run unconditionally; live transports activate when their
+	// env config is present (GATE 5 / Linux).
+	const server = createServer({
+		dev: true,
+		onReady: ({ handle, events }) => {
+			try {
+				const v2 = startV2Loops({
+					handle,
+					events,
+					config: loadConfig(),
+					env: process.env,
+					httpSend: fetchHttpSend,
+					now: () => new Date(),
+				});
+				process.on("SIGTERM", () => v2.stop());
+				process.on("SIGINT", () => v2.stop());
+			} catch (err) {
+				console.error("V2 loops failed to start:", err instanceof Error ? err.message : err);
+			}
+		},
+	});
 	console.log(`nightshift listening on ${server.url}`);
 
 	// Unattended overnight loop (PHASE5A-CONTRACT §8). GUARDED: started ONLY on
@@ -170,34 +205,15 @@ if (import.meta.main) {
 	void makeAutoMergeDeps;
 	void startAutoMergeHook;
 
-	// V2 (Phase 6) boot seams — same GUARDED pattern: composed here, NEVER inside
-	// createServer (the test suite must not start a cron tick, an event-bridge
-	// subscription, or a digest poller). All are inert until the operator wires
-	// the host-specific closures on the Linux VM (GATE 5):
-	//
-	//   const { handle, events, config } = /* from createServer internals */;
-	//   // 1. Cron triggers (§3.2): fire due routine triggers on an interval.
-	//   const cron = startTriggerScheduler({ handle, log: events }, { intervalMs: 60_000 });
-	//   // 2. Notifier → channels (§3.10.4): Telegram/Slack/email behind one bridge.
-	//   const channels = [
-	//     makeTelegramChannel({ botTokenRef: () => process.env.TELEGRAM_BOT_TOKEN,
-	//       chatId: process.env.TELEGRAM_CHAT_ID, send: fetchHttpSend }),
-	//     // makeSlackChannel({ webhookUrlRef: () => process.env.SLACK_WEBHOOK_URL, send: fetchHttpSend }),
-	//   ];
-	//   const notifier = new Notifier({ channels });
-	//   const bridge = makeEventBridge({ handle, log: events, notifier,
-	//     interestingKinds: DEFAULT_INTERESTING_KINDS, mapEvent: defaultMapEvent });
-	//   // 3. Standup digest (§3.5): periodic done/blocked/spend/flaky rollup.
-	//   const digest = makeDigestScheduler({ handle, notifier, now: () => new Date(),
-	//     intervalMs: 8*3600*1000, sinceWindowMs: 8*3600*1000 });
-	//   process.on("SIGTERM", () => { cron.stop(); bridge.stop(); digest.stop(); });
-	//
-	// Webhook (POST /webhooks/:id) and chat (POST /chat/telegram/:id) ingress are
-	// already LIVE via the route table — they need no boot timer. Evidence-based
-	// routing (src/analytics/routing.ts) plugs into the scheduler's resolveSpawn,
-	// and the experiment loop (src/experiment/engine.ts) runs per claimed
-	// kind="experiment" run — both host-closure wiring, same as resolveSpawn above.
-	void startTriggerScheduler;
-	void makeEventBridge;
-	void makeDigestScheduler;
+	// V2 (Phase 6) loops (cron triggers + notifier→channels + standup digest) are
+	// now LIVE via the onReady seam above (src/server/v2Boot.ts), fail-closed on
+	// missing env. Webhook (POST /webhooks/:id) and chat (POST /chat/telegram/:id)
+	// ingress are already live via the route table. The two seams that still need a
+	// host-specific closure (same as resolveSpawn) are wired on the Linux VM (GATE 5):
+	//   - evidence-based routing: wrap resolveSpawn with makeEvidenceResolveSpawn
+	//     (src/orchestrator/evidenceRouting.ts) before startSchedulerLoop.
+	//   - experiment runs: dispatch routine.kind==="experiment" to runExperimentForRun
+	//     (src/orchestrator/experimentRun.ts) with live git/eval deps.
+	//   - AGENTS.md upkeep: scanRepoSnapshot(repoDir) (src/maintenance/repoScan.ts)
+	//     → proposeAgentsMd on a maintenance cadence.
 }

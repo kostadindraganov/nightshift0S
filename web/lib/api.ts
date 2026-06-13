@@ -15,6 +15,8 @@ import type {
   Trigger,
   TranscriptEvent,
   AnalyticsResponse,
+  AgentMemory,
+  ExperimentResponse,
 } from "./types.ts";
 
 // ── Token helpers ────────────────────────────────────────────
@@ -358,4 +360,45 @@ export function getAnalytics(params?: {
       ).toString()
     : "";
   return apiFetch<AnalyticsResponse>(`/analytics${qs}`);
+}
+
+// ── Per-project agent memory (Phase 6, §3 Memory) ──────────────
+export function getProjectMemory(
+  projectId: number,
+  namespace?: string,
+): Promise<AgentMemory[]> {
+  const qs = namespace !== undefined ? `?namespace=${encodeURIComponent(namespace)}` : "";
+  return apiFetch<AgentMemory[]>(`/projects/${projectId}/memory${qs}`);
+}
+
+export function putProjectMemory(
+  projectId: number,
+  key: string,
+  body: { value: unknown; namespace?: string; source?: string },
+): Promise<unknown> {
+  return apiFetch<unknown>(`/projects/${projectId}/memory/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteProjectMemory(
+  projectId: number,
+  key: string,
+  namespace?: string,
+): Promise<{ ok: boolean }> {
+  const qs = namespace !== undefined ? `?namespace=${encodeURIComponent(namespace)}` : "";
+  return apiFetch<{ ok: boolean }>(
+    `/projects/${projectId}/memory/${encodeURIComponent(key)}${qs}`,
+    { method: "DELETE" },
+  );
+}
+
+// ── Experiment ledger (Phase 6, §3.11) ─────────────────────────
+export function getRunExperiment(
+  runId: number,
+  direction?: "lower" | "higher",
+): Promise<ExperimentResponse> {
+  const qs = direction !== undefined ? `?direction=${direction}` : "";
+  return apiFetch<ExperimentResponse>(`/runs/${runId}/experiment${qs}`);
 }

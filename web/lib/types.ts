@@ -224,6 +224,38 @@ export interface AnalyticsResponse {
   routing: RoutingScore[];
 }
 
+// ── Per-project agent memory (Phase 6, §3 Memory) ──────────────
+export interface AgentMemory {
+  id: number;
+  projectId: number;
+  namespace: string;
+  key: string;
+  valueJson: string;
+  source: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ── Experiment ledger (Phase 6, §3.11) ─────────────────────────
+export interface ExperimentLedgerEntry {
+  id: number;
+  routineRunId: number;
+  iteration: number;
+  commitSha: string | null;
+  metricName: string;
+  metricValue: number | null;
+  status: "keep" | "discard" | "crash";
+  memoryNote: string | null;
+  description: string;
+  createdAt: string;
+}
+
+export interface ExperimentResponse {
+  ledger: ExperimentLedgerEntry[];
+  series: { iteration: number; metricValue: number | null; status: string }[];
+  best: ExperimentLedgerEntry | null;
+}
+
 // ── Transcript browser (5.8, §3.12.16) ─────────────────────────
 export interface TranscriptEvent {
   seq: number;
