@@ -45,10 +45,18 @@
   },
 
   "forge": {
-    "provider": "github"
+    "provider": "github",
+    "_provider_options": "github | forgejo | gitlab",
+    "_baseUrl": "Override API base URL for self-hosted instances, e.g. https://gitlab.example.com or https://codeberg.org/api/v1"
   },
 
   "logging": {
     "level": "info"
+  },
+
+  "tournament": {
+    "enabled": false,
+    "challengerProvider": "claude-code",
+    "_comment": "When enabled, each review round runs defaultReviewer + challengerProvider in parallel and synthesizes the union of findings (stricter verdict wins). Enable to increase review coverage at the cost of 2× reviewer tokens."
   }
 }

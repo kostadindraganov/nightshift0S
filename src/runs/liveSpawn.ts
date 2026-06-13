@@ -36,6 +36,7 @@ import { TmuxLauncher, type Launcher } from "./launcher.ts";
 import { spawnSandboxed } from "../sandbox/spawn.ts";
 import type { SandboxProfile } from "../sandbox/profile.ts";
 import type { ReviewDeps, ReviewerRunResult } from "../orchestrator/review.ts";
+import { makeTournamentRunner } from "../review/tournament.ts";
 
 // ---------------------------------------------------------------------------
 // One-shot runtime (LIVE-WIRING D1)
@@ -200,6 +201,8 @@ export interface LiveDeps {
 	repoDir?: string;
 	/** Reviewer provider (default "codex" — LIVE-WIRING D6). */
 	reviewerProvider?: string;
+	/** When set, tournament mode runs this second provider in parallel and synthesizes results. */
+	tournamentChallengerProvider?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +388,20 @@ export function makeRunReviewer(deps: LiveDeps): ReviewDeps["runReviewer"] {
 
 		return { stdout: result.stdout, runId: run.id, headSha, provider };
 	};
+}
+
+/**
+ * Like `makeRunReviewer` but wraps the result in tournament mode:
+ * spawns a second challenger reviewer in parallel and synthesizes the union.
+ * Falls back gracefully: if either runner errors, the other's output is used.
+ */
+export function makeTournamentReviewer(deps: LiveDeps): ReviewDeps["runReviewer"] {
+	const primaryRunner = makeRunReviewer(deps);
+	const challengerRunner = makeRunReviewer({
+		...deps,
+		reviewerProvider: deps.tournamentChallengerProvider,
+	});
+	return makeTournamentRunner(primaryRunner, challengerRunner);
 }
 
 // ---------------------------------------------------------------------------

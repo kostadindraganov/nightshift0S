@@ -77,7 +77,10 @@ export interface NightshiftConfig {
 		unattendedUntrustedRepos: boolean;
 	};
 	forge: {
+		/** "github" | "forgejo" | "gitlab" */
 		provider: string;
+		/** Override the forge API base URL (GitHub Enterprise, self-hosted Forgejo/GitLab). */
+		baseUrl?: string;
 		/**
 		 * Allowlist of GitHub check-run App IDs whose green checks are trusted by
 		 * the auto-merge preflight (PHASE5C §3.12.26). EMPTY ⇒ preflight check (b)
@@ -88,6 +91,16 @@ export interface NightshiftConfig {
 	};
 	logging: {
 		level: string;
+	};
+	tournament: {
+		/** When true, each review round spawns TWO reviewer one-shots in parallel and synthesizes the union. */
+		enabled: boolean;
+		/**
+		 * Provider for the second (challenger) review slot.
+		 * The primary slot always uses providers.defaultReviewer.
+		 * Must differ from defaultReviewer for the tournament to add value.
+		 */
+		challengerProvider: string;
 	};
 }
 
@@ -167,6 +180,10 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
 	},
 	logging: {
 		level: "info",
+	},
+	tournament: {
+		enabled: false,
+		challengerProvider: "claude-code",
 	},
 };
 

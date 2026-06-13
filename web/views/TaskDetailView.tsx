@@ -7,14 +7,15 @@
  * labelled placeholder (the empty/disconnected state).
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import * as api from "../lib/api.ts";
 import { useEventStream } from "../lib/useEventStream.ts";
-import type { Task, ThreadEvent, Finding } from "../lib/types.ts";
+import type { Task, ThreadEvent, Finding, TranscriptEvent } from "../lib/types.ts";
 import { ThreadView } from "../components/thread/ThreadView.tsx";
 import { FindingsPanel } from "../components/thread/FindingsPanel.tsx";
 import { VerdictPanel } from "../components/thread/VerdictPanel.tsx";
 import { TerminalView } from "../components/terminal/TerminalView.tsx";
+import { TranscriptView } from "../components/thread/TranscriptView.tsx";
 import type { NightshiftEvent } from "../lib/api.ts";
 
 // Run states with a still-live tmux pane worth attaching to (non-terminal).
@@ -31,7 +32,7 @@ interface Props {
   onBack: () => void;
 }
 
-type Panel = "thread" | "findings" | "verdict";
+type Panel = "thread" | "findings" | "verdict" | "transcript";
 
 export default function TaskDetailView({ taskId, onBack }: Props) {
   const [task, setTask] = useState<Task | null>(null);
@@ -43,6 +44,9 @@ export default function TaskDetailView({ taskId, onBack }: Props) {
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [liveRunId, setLiveRunId] = useState<number | null>(null);
+  const [transcript, setTranscript] = useState<TranscriptEvent[]>([]);
+  const [transcriptLoading, setTranscriptLoading] = useState(false);
+  const transcriptFetched = useRef(false);
 
   const reload = useCallback(async () => {
     try {
@@ -90,6 +94,26 @@ export default function TaskDetailView({ taskId, onBack }: Props) {
   );
 
   useEventStream(handleEvent);
+
+  const loadTranscript = useCallback(async () => {
+    setTranscriptLoading(true);
+    try {
+      const rows = await api.getTaskTranscript(taskId);
+      setTranscript(rows);
+      transcriptFetched.current = true;
+    } catch {
+      // leave stale data on error
+    } finally {
+      setTranscriptLoading(false);
+    }
+  }, [taskId]);
+
+  function handlePanelChange(panel: Panel) {
+    setActivePanel(panel);
+    if (panel === "transcript" && !transcriptFetched.current) {
+      void loadTranscript();
+    }
+  }
 
   // Derive the latest verdict summary from thread events.
   const verdictEvents = [...events]
@@ -299,14 +323,17 @@ export default function TaskDetailView({ taskId, onBack }: Props) {
                   padding: "0 var(--space-xl)",
                 }}
               >
-                <button style={tabStyle(activePanel === "thread")} onClick={() => setActivePanel("thread")}>
+                <button style={tabStyle(activePanel === "thread")} onClick={() => handlePanelChange("thread")}>
                   Thread ({events.length})
                 </button>
-                <button style={tabStyle(activePanel === "findings")} onClick={() => setActivePanel("findings")}>
+                <button style={tabStyle(activePanel === "findings")} onClick={() => handlePanelChange("findings")}>
                   Findings ({findings.length})
                 </button>
-                <button style={tabStyle(activePanel === "verdict")} onClick={() => setActivePanel("verdict")}>
+                <button style={tabStyle(activePanel === "verdict")} onClick={() => handlePanelChange("verdict")}>
                   Actions
+                </button>
+                <button style={tabStyle(activePanel === "transcript")} onClick={() => handlePanelChange("transcript")}>
+                  Transcript
                 </button>
               </div>
 
@@ -329,6 +356,33 @@ export default function TaskDetailView({ taskId, onBack }: Props) {
                     verdictOutcome={verdictOutcome}
                     loading={actionLoading}
                   />
+                )}
+                {activePanel === "transcript" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+                      <span style={{ fontSize: 12, color: "var(--color-muted)", fontFamily: "var(--font-sans)" }}>
+                        {transcript.length} events
+                      </span>
+                      <button
+                        style={{
+                          padding: "2px 10px",
+                          fontSize: 12,
+                          fontFamily: "var(--font-sans)",
+                          fontWeight: 600,
+                          background: "var(--color-surface-card)",
+                          border: "1px solid var(--color-hairline)",
+                          borderRadius: "var(--radius-sm)",
+                          color: "var(--color-body)",
+                          cursor: "pointer",
+                        }}
+                        onClick={() => void loadTranscript()}
+                        disabled={transcriptLoading}
+                      >
+                        {transcriptLoading ? "Loading…" : "Refresh"}
+                      </button>
+                    </div>
+                    <TranscriptView events={transcript} loading={transcriptLoading} />
+                  </div>
                 )}
               </div>
             </div>

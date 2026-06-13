@@ -1,413 +1,262 @@
-# Nightshift — Инсталация и конфигурация
+# Nightshift — Installation & Configuration
 
-Пълно ръководство за инсталиране, конфигуриране и стартиране на проекта.
-
-> **Важно за frontend-а:** В момента Nightshift е **само backend** — HTTP JSON API
-> + SSE event stream. Уеб интерфейсът (React kanban) е таск **1.6** в
-> `IMPLEMENTATION-PLAN.md` и **още не е имплементиран**. Папката `ui-reference/`
-> съдържа само референтен React код (копиран от съседен проект), който **не е
-> свързан, няма `package.json` и не може да се стартира**. Виж секция
-> [Frontend](#7-frontend-състояние) долу.
+Setup guide for macOS development and Linux production.
 
 ---
 
-## 1. Технологичен стек
+## Prerequisites
 
-| Компонент      | Технология                                  |
-|----------------|---------------------------------------------|
-| Runtime        | [Bun](https://bun.sh) (≥ 1.3)               |
-| Език           | TypeScript (ESM, strict)                    |
-| База данни     | SQLite през `bun:sqlite` (WAL режим)        |
-| ORM / миграции | Drizzle ORM + drizzle-kit                   |
-| HTTP сървър    | `Bun.serve` (вградено, без Express)         |
-| Тестове        | `bun test` (вграден test runner)            |
+| Tool | Version | Notes |
+|------|---------|-------|
+| [Bun](https://bun.sh) | ≥ 1.3 | Runtime, test runner, package manager — replaces Node/npm |
+| Git | ≥ 2.38 | Required for forge features and version probe |
+| `claude` CLI | latest | Claude Code — default coder; install via `npm i -g @anthropic-ai/claude-code` |
+| `codex` CLI | latest | Default reviewer; install via `npm i -g @openai/codex` |
+| `bwrap` | any | **Linux only** — bubblewrap sandbox for agents (`apt install bubblewrap`) |
 
-Външни зависимости са минимални — само `drizzle-orm` в runtime. SQLite е
-вграден в Bun, не се инсталира отделно.
+Only `bun` is strictly required to run the server. The AI CLIs are only needed when you actually trigger a coding or review run.
 
 ---
 
-## 2. Предпоставки (какво трябва да имаш)
-
-1. **Bun ≥ 1.3** — единственото задължително нещо. Проверка:
-   ```sh
-   bun --version
-   ```
-   Ако липсва, инсталирай:
-   ```sh
-   curl -fsSL https://bun.sh/install | bash
-   ```
-   (на macOS може и `brew install oven-sh/bun/bun`)
-
-2. **Git** — за version probe-а (`/version` чете `.git/HEAD`) и за бъдещите
-   forge функции.
-
-3. **НЕ ти трябват:** Node.js, npm, отделен SQLite, Docker. Bun покрива всичко.
-
----
-
-## 3. Инсталация стъпка по стъпка
+## Install
 
 ```sh
-# 1. влез в директорията на проекта
-cd "SOFTWARE FACTORY/nightshift"
+# 1. Clone and enter the project
+git clone https://github.com/your-org/nightshift.git
+cd nightshift
 
-# 2. инсталирай зависимостите (root + vendor/sandcastle workspace)
+# 2. Install dependencies (Bun reads bun.lock — no network surprises)
 bun install
 
-# 3. приложи миграциите към базата (създава data/nightshift.db)
+# 3. Apply database migrations (creates data/nightshift.db)
 bun run db:migrate
 ```
 
-`bun install` чете `bun.lock` (вече е в repo-то) и инсталира:
-- runtime: `drizzle-orm`
-- dev: `@types/bun`, `drizzle-kit`, `typescript`
-- workspace `vendor/sandcastle` (декларирано в `package.json` → `workspaces`)
-
-> Стъпка 3 не е строго задължителна — сървърът сам прилага миграциите при
-> стартиране (виж `src/server/main.ts`). Полезна е само ако искаш да създадеш
-> базата предварително или да я мигрираш отделно.
+The server also auto-applies migrations on startup, so step 3 is optional.
 
 ---
 
-## 4. Конфигурация (environment variables)
+## Configuration
 
-Целият контрол е през env променливи. Няма config файл още (read-only Settings
-страницата е таск 1.7, още не е готова).
+### Config file
 
-| Променлива             | По подразбиране        | Предназначение                                                        |
-|------------------------|------------------------|-----------------------------------------------------------------------|
-| `NIGHTSHIFT_PORT`      | `3000`                 | Порт, на който слуша HTTP сървърът.                                    |
-| `NIGHTSHIFT_DB_PATH`   | `data/nightshift.db`   | Път до SQLite файла. `:memory:` се поддържа (за тестове).             |
-| `NIGHTSHIFT_API_TOKEN` | *(няма)*               | Bearer токен за защитените route-ове. **Ако липсва → fail closed.**   |
-
-### Важно за `NIGHTSHIFT_API_TOKEN`
-
-Сървърът работи **fail-closed**: ако токенът не е зададен, всеки защитен
-endpoint връща `503 auth_not_configured` — т.е. API-то на практика е заключено,
-докато не зададеш токен. Само публичните probe-ове (`/healthz`, `/readyz`,
-`/version`) работят без токен.
-
-Токенът се чете **при всяка заявка** (не се кешира при старт), сравнението е
-constant-time (SHA-256 + `timingSafeEqual`).
-
-### Препоръчителен `.env`
-
-`.env` е в `.gitignore` — създай го локално:
+Copy the example and edit as needed:
 
 ```sh
-# .env
-NIGHTSHIFT_PORT=3000
-NIGHTSHIFT_DB_PATH=data/nightshift.db
-NIGHTSHIFT_API_TOKEN=$(openssl rand -hex 32)
+cp nightshift.config.example.json nightshift.config.json
 ```
 
-Bun автоматично зарежда `.env`. Алтернативно подай inline:
+Key sections:
+
+```jsonc
+{
+  "providers": {
+    "defaultCoder": "claude-code",   // "codex" | "claude-code" | "gemini"
+    "defaultReviewer": "codex",      // same options
+    "claudeCodeEnabled": true,
+    "codexEnabled": true
+  },
+  "concurrency": {
+    "maxParallelSlots": 1            // raise on beefy Linux hosts
+  },
+  "review": {
+    "maxRounds": 3,
+    "autoMergeEnabled": false
+  },
+  "sandbox": {
+    "unattendedUntrustedRepos": false  // requires egress control on Linux
+  }
+}
+```
+
+Full reference: `nightshift.config.example.json`.
+
+### Environment variables
+
+Bun auto-loads `.env`. Create one in the project root:
 
 ```sh
-NIGHTSHIFT_API_TOKEN=my-secret-token bun run dev
+# .env  (never commit this file)
+NIGHTSHIFT_API_TOKEN=<openssl rand -hex 32>
+GITHUB_TOKEN=ghp_...
 ```
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NIGHTSHIFT_API_TOKEN` | *(none)* | Bearer token for all protected endpoints. **Required** — server is fail-closed without it (returns `503 auth_not_configured`). |
+| `NIGHTSHIFT_PORT` | `3000` | HTTP listen port |
+| `NIGHTSHIFT_HOST` | `127.0.0.1` | HTTP listen host |
+| `NIGHTSHIFT_DB_PATH` | `data/nightshift.db` | SQLite file path (`:memory:` works for tests) |
+| `NIGHTSHIFT_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+| `NIGHTSHIFT_REPO_DIR` | *(none)* | Absolute path to a repo to bootstrap a project from |
+| `GITHUB_TOKEN` | *(none)* | GitHub PAT with `repo` scope — needed for forge push and PR creation |
+| `OPENROUTER_API_KEY` | *(none)* | Required when `openrouterEnabled: true` in config |
 
 ---
 
-## 5. Стартиране на сървъра
+## macOS (development)
+
+The agent sandbox uses `bwrap`, which is Linux-only. On macOS the two escape-hatch env vars unlock unsandboxed spawns for attended local development:
+
+| Variable | Purpose |
+|----------|---------|
+| `NIGHTSHIFT_ALLOW_UNSANDBOXED_ONESHOTS=1` | Allows the reviewer CLI (`codex`/`claude --print`) to spawn without bwrap |
+| `NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER=1` | Allows the coder CLI (`claude code`) to spawn without bwrap |
+
+### PATH gotcha
+
+When Nightshift spawns `claude` or `codex`, it inherits `process.env.PATH` from the server process — not your interactive shell profile. If those binaries live in `~/.local/bin`, `~/.bun/bin`, or similar, make sure the server is started from a terminal where `which claude` and `which codex` return valid paths.
+
+**Recommended dev start command:**
 
 ```sh
+NIGHTSHIFT_ALLOW_UNSANDBOXED_ONESHOTS=1 \
+NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER=1 \
+PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" \
 bun run dev
 ```
 
-Това изпълнява `bun run src/server/main.ts`, който:
-1. отваря базата (`NIGHTSHIFT_DB_PATH`) и прилага миграциите;
-2. вдига event log-а (write-through DB + SSE източник);
-3. слуша на `NIGHTSHIFT_PORT`.
-
-При успех ще видиш:
-```
-nightshift listening on http://localhost:3000/
-```
-
-### Бърза проверка (smoke test)
+Or use a `.env.local` file:
 
 ```sh
-# публични probe-ове — без токен
-curl http://localhost:3000/healthz      # {"ok":true}
-curl http://localhost:3000/readyz       # {"ok":true} ако миграциите са минали
-curl http://localhost:3000/version      # {name, version, commit}
-
-# защитен route — иска Bearer токен
-curl -H "Authorization: Bearer $NIGHTSHIFT_API_TOKEN" \
-     http://localhost:3000/routes        # списък с всички endpoint-и
+# .env.local
+NIGHTSHIFT_API_TOKEN=dev-token-change-me
+NIGHTSHIFT_ALLOW_UNSANDBOXED_ONESHOTS=1
+NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER=1
 ```
 
-> Бележка: горните `curl` команди се изпълняват в **твоя** терминал. Ако
-> работиш през Claude Code сесия с context-mode, `curl` е блокиран — ползвай
-> `ctx_execute`.
+Then: `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" bun run dev`
 
-### Налични API endpoint-и (текущо)
-
-| Метод | Път                                  | Auth | Описание                                  |
-|-------|--------------------------------------|------|-------------------------------------------|
-| GET   | `/healthz`                           | не   | Liveness probe                            |
-| GET   | `/readyz`                            | не   | Readiness (DB отворена + мигрирана)       |
-| GET   | `/version`                           | не   | Име, версия, git commit                   |
-| GET   | `/routes`                            | да   | Самоописание на API-то                    |
-| POST  | `/projects`                          | да   | Създай проект                             |
-| GET   | `/projects`                          | да   | Списък проекти                            |
-| POST  | `/tasks`                             | да   | Създай таск                               |
-| GET   | `/tasks`                             | да   | Списък таскове (`?project_id=`, `?state=`)|
-| GET   | `/tasks/:id`                         | да   | Един таск                                 |
-| PATCH | `/tasks/:id`                         | да   | Обнови съдържание (без state)             |
-| DELETE| `/tasks/:id`                         | да   | Изтрий таск                               |
-| POST  | `/tasks/:id/transition`              | да   | State machine преход                      |
-| POST  | `/tasks/:id/dependencies`            | да   | Добави зависимост                         |
-| DELETE| `/tasks/:id/dependencies/:depId`     | да   | Премахни зависимост                       |
-| GET   | `/events/stream`                     | да   | SSE стрийм на event log-а                 |
-
----
-
-## 6. Тестове и работа с базата
+### Smoke test
 
 ```sh
-# всички тестове (db, events, server, tasks)
-bun test
+# Server must be running in another terminal first
+TOKEN=dev-token-change-me
 
-# генерирай нова миграция след промяна в src/db/schema.ts
-bun run db:generate
-
-# приложи миграциите ръчно
-bun run db:migrate
+curl http://localhost:3000/healthz        # {"ok":true}
+curl http://localhost:3000/readyz         # {"ok":true}
+curl -H "Authorization: Bearer $TOKEN" \
+     http://localhost:3000/routes         # full route listing
 ```
 
-> **Никога не пускай `drizzle-kit push`** — миграциите се ГЕНЕРИРАТ, ревюват и
-> commit-ват (виж `drizzle.config.ts` и `AGENTS.md`). `push` diff-ва срещу жива
-> база и може да изтрие данни.
-
 ---
 
-## 7. Frontend (състояние)
+## Linux (production)
 
-**Все още няма работещ frontend.** Сървърът връща JSON и SSE — няма HTML, няма
-статични файлове, няма dev сървър за UI.
-
-- `ui-reference/` = **референтен** React код (app-shell, kanban, theme), копиран
-  от съседен проект. Няма `package.json`, няма build, **не се стартира**. Служи
-  само като отправна точка за бъдещата имплементация.
-- Истинският UI е таск **1.6** в `IMPLEMENTATION-PLAN.md`: design tokens
-  (`design-tokens.json`) + app shell + минимален kanban board, който чете live
-  SSE от `/events/stream`. Този таск е отворен (☐), затова инструкции за
-  „стартиране на frontend-а" още няма как да дам — той не съществува като
-  изпълним артефакт.
-
-Когато 1.6 бъде имплементиран, тази секция ще се обнови с реалните стъпки
-(вероятно отделен Bun/Vite процес или статични файлове, обслужвани от
-`Bun.serve`). До тогава взаимодействието с Nightshift е през HTTP API-то по-горе
-и SSE стрийма.
-
----
-
-## 8. Структура на проекта (накратко)
-
-```
-src/
-  db/        bun:sqlite клиент, schema, миграции, writer queue
-  events/    глобален event log + broker (write-through + SSE)
-  server/    Bun.serve, route таблица, bearer auth
-  tasks/     CRUD, state machine, зависимости (BFS cycle check)
-drizzle/     генерирани SQL миграции (0001_*.sql)
-docs/        BLUEPRINT.md + 3-те спецификации + plan review log
-ui-reference/  референтен React код (НЕ е свързан)
-vendor/sandcastle/  вграден workspace
-```
-
-Подробности: `README.md` (общ преглед), `IMPLEMENTATION-PLAN.md` (фази и
-таскове), `docs/BLUEPRINT.md` (§3.12 = обвързващи правила), `AGENTS.md`
-(оперативни правила).
-
----
-
-## 9. Чести проблеми
-
-| Симптом                                   | Причина / решение                                                       |
-|-------------------------------------------|-------------------------------------------------------------------------|
-| `503 auth_not_configured` на всеки route  | `NIGHTSHIFT_API_TOKEN` не е зададен — задай го в `.env`.                |
-| `401 unauthorized`                        | Липсва или грешен `Authorization: Bearer <token>` хедър.               |
-| `/readyz` връща `503 not_ready`           | Миграциите не са приложени — пусни `bun run db:migrate`.               |
-| `bun: command not found`                  | Bun не е инсталиран / не е в PATH — виж секция 2.                       |
-| Сървърът reset-ва SSE връзката            | Зад reverse proxy с idle timeout < 60s — вдигни го (heartbeat е 15s).  |
-
----
-
-## 10. Linux deploy (production)
-
-### 10.1 Изисквания
-
-| Компонент | Версия |
-|-----------|--------|
-| Linux     | Debian 12 / Ubuntu 22.04+ (или еквивалент systemd) |
-| git       | ≥ 2.38 |
-| curl      | за Bun install script |
-| systemd   | вграден — deploy.sh управлява unit-а |
-| tmux      | за агентски сесии (инсталирай с `apt install tmux`) |
-
-Bun-ът се инсталира автоматично от deploy.sh за service user-а — **не е нужно предварително**.
-
-### 10.2 Задължителни env vars (secrets)
-
-Задай ги **преди** `ops/deploy.sh`. Никога не ги commit-вай.
-
-| Променлива             | Предназначение                                                         |
-|------------------------|------------------------------------------------------------------------|
-| `NIGHTSHIFT_API_TOKEN` | Bearer токен за всички защитени API endpoints. Генерирай с `openssl rand -hex 32`. |
-| `GITHUB_TOKEN`         | GitHub PAT с scope `repo` — за forge push + отваряне на PR.           |
-
-Опционални provider keys (задай ако използваш):
-
-| Променлива             | Предназначение                                                         |
-|------------------------|------------------------------------------------------------------------|
-| `ANTHROPIC_API_KEY`    | claude-code provider чрез API auth (може и subscription auth).        |
-| `OPENAI_API_KEY`       | codex provider.                                                        |
-
-### 10.3 Deploy стъпки
+### Quick deploy
 
 ```sh
-# 1. Клонирай репото на сървъра (или git pull за ъпдейт)
+# On the server as root (or sudo):
 git clone https://github.com/your-org/nightshift.git /opt/nightshift
 cd /opt/nightshift
 
-# 2. Стартирай deploy.sh като root (или sudo).
-#    Скриптът е идемпотентен — безопасно е да го пуснеш повторно.
 sudo \
   NIGHTSHIFT_API_TOKEN="$(openssl rand -hex 32)" \
   GITHUB_TOKEN="ghp_yourtoken" \
   bash ops/deploy.sh
 ```
 
-deploy.sh прави по ред:
+`ops/deploy.sh` is idempotent. It:
+1. Creates a `nightshift` service user
+2. Installs Bun for that user
+3. Runs `bun install --frozen-lockfile` and `bun run db:migrate`
+4. Writes secrets to `/etc/nightshift/env` (mode 640, root:nightshift)
+5. Installs and starts `nightshift.service` (systemd)
+6. Health-checks `/healthz`
 
-1. Създава `nightshift` service user (ако не съществува).
-2. Настройва ownership на `/opt/nightshift` и `/opt/nightshift/data/`.
-3. Инсталира Bun за service user-а (`~/.bun/bin/bun`).
-4. `bun install --frozen-lockfile` + `bun run db:migrate`.
-5. Записва secrets в `/etc/nightshift/env` (mode 640, root:nightshift).
-6. Инсталира и (ре)стартира `nightshift.service` unit.
-7. Прави health check към `/healthz` (до 15s).
-
-### 10.4 Управление на service-а
+### Service management
 
 ```sh
-# статус
 systemctl status nightshift.service
-
-# логове (live)
-journalctl -u nightshift.service -f
-
-# рестарт (напр. след ръчна промяна на секрети)
+journalctl -u nightshift.service -f    # live logs
 systemctl restart nightshift.service
-
-# спиране
-systemctl stop nightshift.service
 ```
 
-### 10.5 Актуализация (git pull + redeploy)
+### Update
 
 ```sh
 cd /opt/nightshift
 git pull --ff-only
-
-# Подай същите secrets като при първоначалния deploy.
 sudo \
-  NIGHTSHIFT_API_TOKEN="$(cat /etc/nightshift/env | grep NIGHTSHIFT_API_TOKEN | cut -d= -f2)" \
-  GITHUB_TOKEN="$(cat /etc/nightshift/env | grep GITHUB_TOKEN | cut -d= -f2)" \
+  NIGHTSHIFT_API_TOKEN="$(grep NIGHTSHIFT_API_TOKEN /etc/nightshift/env | cut -d= -f2)" \
+  GITHUB_TOKEN="$(grep GITHUB_TOKEN /etc/nightshift/env | cut -d= -f2)" \
   bash ops/deploy.sh
 ```
 
-Скриптът е идемпотентен: повторното изпълнение е безопасно — ъпдейтва зависимостите, прилага нови миграции, и рестартира service-а.
+### bwrap sandbox
 
-### 10.6 Активиране на egress контрол (nftables)
-
-Egress контролът е **задължителен** за `unattended_untrusted_repos=true`. Без него системата отказва да стартира unattended runs на untrusted repos (fail-closed guard в `src/egress/guard.ts`).
-
-Използвай `ops/egress-apply.sh` (изисква root, Linux):
+Install bubblewrap — the sandbox activates automatically when `bwrap` is on PATH:
 
 ```sh
-# Вземи UID на service user-а
+sudo apt install bubblewrap
+which bwrap && bwrap --version
+```
+
+If `bwrap` is absent the server logs a warning and runs without namespace isolation. Acceptable for trusted repos; **not** for `unattendedUntrustedRepos: true`.
+
+### Egress control (required for untrusted repos)
+
+```sh
 SERVICE_UID=$(id -u nightshift)
-
-# Приложи nftables ruleset (default-DROP + provider/GitHub allowlist)
 sudo NIGHTSHIFT_EGRESS_UID=$SERVICE_UID bash /opt/nightshift/ops/egress-apply.sh
-
-# Провери (трябва да видиш nightshift_egress_uidXXXX table)
-sudo nft list tables
+# Verify
+sudo nft list tables    # should show nightshift_egress_uidXXXX
 ```
 
-За допълнителни хостове (напр. self-hosted GitHub):
-
-```sh
-sudo NIGHTSHIFT_EGRESS_UID=$SERVICE_UID \
-     NIGHTSHIFT_EGRESS_HOSTS="git.example.com" \
-     bash /opt/nightshift/ops/egress-apply.sh
-```
-
-Teardown (деактивирай egress контрол):
-
-```sh
-sudo NIGHTSHIFT_EGRESS_UID=$SERVICE_UID bash /opt/nightshift/ops/egress-teardown.sh
-```
-
-След активиране задай в `nightshift.config.json`:
-
+Then in `nightshift.config.json`:
 ```json
 {
   "sandbox": {
-    "egressAllowlist": [
-      "api.anthropic.com",
-      "api.openai.com",
-      "api.github.com",
-      "github.com"
-    ],
+    "egressAllowlist": ["api.anthropic.com","api.openai.com","api.github.com","github.com"],
     "unattendedUntrustedRepos": true
   }
 }
 ```
 
-### 10.7 Активиране на bwrap sandbox
+Teardown: `sudo NIGHTSHIFT_EGRESS_UID=$SERVICE_UID bash ops/egress-teardown.sh`
 
-`bwrap` (bubblewrap) осигурява namespace isolation за агентските процеси. На Linux инсталирай с:
-
-```sh
-sudo apt install bubblewrap
-```
-
-Провери:
-
-```sh
-which bwrap && bwrap --version
-```
-
-Ако `bwrap` е наличен на PATH при стартиране на run, `src/sandbox/spawn.ts` го активира автоматично. Ако **не е** наличен, системата работи без него (предупреждение в лога), но namespace isolation е изключен — приемливо за доверени repos, **не** за untrusted.
-
-### 10.8 Reverse proxy (nginx пример)
-
-Сървърът слуша на `127.0.0.1:3000` по подразбиране. Изложи го чрез nginx:
+### nginx reverse proxy
 
 ```nginx
 server {
     listen 443 ssl;
     server_name nightshift.example.com;
-
-    # SSE изисква дълъг idle timeout (heartbeat е 15s, вдигни над 60s)
-    proxy_read_timeout 120s;
-    proxy_send_timeout 120s;
+    proxy_read_timeout 120s;   # SSE heartbeat is 15s — must exceed 60s
 
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        # За SSE: изключи буферирането
-        proxy_buffering off;
+        proxy_buffering off;   # required for SSE
         proxy_cache off;
         proxy_set_header Connection '';
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
     }
 }
 ```
+
+---
+
+## Running tests
+
+```sh
+# Correct — bare `bun test` hangs (no file filter)
+bun run test
+
+# Type check
+bun run typecheck
+```
+
+---
+
+## Troubleshooting
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `One-shot spawn disabled — unsandboxed one-shots refused off Linux` | macOS, missing env var | Add `NIGHTSHIFT_ALLOW_UNSANDBOXED_ONESHOTS=1` |
+| `unsandboxed coder refused off Linux` | macOS, missing env var | Add `NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER=1` |
+| `ENOENT: no such file or directory, posix_spawn 'claude'` | `claude` not on PATH when server starts | Start server with `PATH="$HOME/.local/bin:$PATH"` prefix |
+| `ENOENT: posix_spawn 'codex'` | `codex` not on PATH | Same fix; ensure `which codex` works in the same shell |
+| `503 auth_not_configured` on every route | `NIGHTSHIFT_API_TOKEN` not set | Set it in `.env` |
+| `401 unauthorized` | Wrong or missing `Authorization: Bearer` header | Check token matches `NIGHTSHIFT_API_TOKEN` |
+| `/readyz` returns `503 not_ready` | Migrations not applied | Run `bun run db:migrate` |
+| SSE connection drops repeatedly | Reverse proxy idle timeout too short | Set `proxy_read_timeout` > 60s |

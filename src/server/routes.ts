@@ -36,6 +36,7 @@ import { codeReviewJudge } from "../review/judge.ts";
 import {
 	makeGetDiff,
 	makeRunReviewer,
+	makeTournamentReviewer,
 	makeResumeCoder,
 	spawnOneShotCaptured,
 	buildOneShotArgv,
@@ -227,11 +228,18 @@ const buildReviewDeps: ReviewRoutesConfig["buildDeps"] = (ctx): ReviewDeps => {
 		engine: runVerdict,
 		judge: codeReviewJudge,
 		getDiff: makeGetDiff({ handle: ctx.handle, log: ctx.events }),
-		runReviewer: makeRunReviewer({
-			handle: ctx.handle,
-			log: ctx.events,
-			reviewerProvider: cfg.providers.defaultReviewer,
-		}),
+		runReviewer: cfg.tournament.enabled
+			? makeTournamentReviewer({
+				handle: ctx.handle,
+				log: ctx.events,
+				reviewerProvider: cfg.providers.defaultReviewer,
+				tournamentChallengerProvider: cfg.tournament.challengerProvider,
+			  })
+			: makeRunReviewer({
+				handle: ctx.handle,
+				log: ctx.events,
+				reviewerProvider: cfg.providers.defaultReviewer,
+			  }),
 		resumeCoder: makeResumeCoder({
 			handle: ctx.handle,
 			log: ctx.events,
