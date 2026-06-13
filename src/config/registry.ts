@@ -237,6 +237,19 @@ export const REGISTRY: Record<string, RegistryEntry> = {
 			return { ok: true };
 		},
 	},
+	// -- coder -----------------------------------------------------------------
+	"coder.skillsMount": {
+		key: "coder.skillsMount",
+		configPath: "coder.skillsMount",
+		type: "stringArray",
+		scopes: ["global", "project", "routine"],
+		secret: false,
+		defaultValue: DEFAULT_CONFIG.coder.skillsMount,
+		validate(v) {
+			if (!isStringArray(v)) return { ok: false, reason: "must be an array of skill slugs" };
+			return { ok: true };
+		},
+	},
 	// -- logging ---------------------------------------------------------------
 	"logging.level": {
 		key: "logging.level",

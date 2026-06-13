@@ -146,6 +146,15 @@ export interface NightshiftConfig {
 		enabled: boolean;
 		maxRounds: number;
 	};
+	coder: {
+		/**
+		 * Blueprint workflow-skill slugs mounted into each spawned coder's
+		 * per-task HOME (`vendor/blueprint-skills/skills/<slug>/SKILL.md`). Empty
+		 * disables the mount. Only the implementation-phase skills by default;
+		 * spec/plan/branch/commit/pr are owned by the nightshift orchestrator.
+		 */
+		skillsMount: string[];
+	};
 }
 
 export interface ConfigEntry {
@@ -257,6 +266,9 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
 	selfOptimize: {
 		enabled: false,
 		maxRounds: 5,
+	},
+	coder: {
+		skillsMount: ["implement", "tdd", "debug", "refactor", "review"],
 	},
 };
 

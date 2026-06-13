@@ -46,6 +46,8 @@ export interface SpawnPlan {
 	prompt: string;
 	repoDir: string;
 	homeRoot: string;
+	/** Blueprint workflow-skill slugs to mount (config.coder.skillsMount). */
+	skillsMount?: string[];
 }
 
 export interface SchedulerDeps {

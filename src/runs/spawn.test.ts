@@ -10,7 +10,7 @@
  */
 
 import { beforeEach, afterEach, expect, test, describe } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -307,6 +307,43 @@ describe("spawnRun", () => {
 			expect(shellStr).toContain("cat");
 			expect(shellStr).toContain("rm");
 			expect(shellStr).toContain("exec");
+		},
+		{ timeout: 15_000 },
+	);
+
+	test(
+		"skillsMount mounts the vendored skill into HOME and footers the prompt",
+		async () => {
+			const repoDir = makeGitRepo();
+			const homeRoot = join(tmp, "homes");
+			const launcher = new FakeLauncher();
+			const { taskId, runId } = seedTaskAndRun();
+
+			await spawnRun(
+				{ handle, log, launcher },
+				{
+					taskId,
+					runId,
+					provider: "claude-code",
+					prompt: "build the thing",
+					repoDir,
+					homeRoot,
+					skillsMount: ["implement"],
+				},
+			);
+
+			// The vendored skill must be copied into the per-task HOME.
+			const homePath = join(homeRoot, String(taskId));
+			const mounted = join(homePath, ".nightshift-skills", "implement", "SKILL.md");
+			expect(existsSync(mounted)).toBe(true);
+
+			// The prompt-via-file temp file (not yet consumed under FakeLauncher) must
+			// carry the footer pointing the agent at the mounted skill.
+			const promptFile = join(homePath, `.ns-prompt-${runId}`);
+			const written = readFileSync(promptFile, "utf8");
+			expect(written).toContain("build the thing");
+			expect(written).toContain("Workflow skills");
+			expect(written).toContain(mounted);
 		},
 		{ timeout: 15_000 },
 	);

@@ -20,6 +20,7 @@ import type { DbHandle } from "../db/client.ts";
 import type { EventLog } from "../events/events.ts";
 import type { RunRow } from "../db/schema.ts";
 import { createWorktree } from "../worktree/worktree.ts";
+import { mountSkills, appendSkillsFooter } from "./skills.ts";
 import { transitionRun } from "./transitions.ts";
 import type { Launcher, LaunchHandle } from "./launcher.ts";
 import { buildBwrapArgs, type SandboxProfile } from "../sandbox/profile.ts";
@@ -234,6 +235,14 @@ export interface SpawnRunInput {
 	bearer?: string;
 	/** Passed through to buildAgentInvocation → `--resume '<id>'` (D2). */
 	resumeSessionId?: string;
+	/**
+	 * Workflow-skill slugs to mount into the per-task HOME before launch
+	 * (blueprint integration). When set and non-empty, the matching
+	 * `vendor/blueprint-skills/skills/<slug>/SKILL.md` files are copied under
+	 * `<homePath>/.nightshift-skills/` and a footer pointing at them is appended
+	 * to the prompt. Omit/empty = no skills mounted (backward compatible).
+	 */
+	skillsMount?: string[];
 }
 
 /**
@@ -249,7 +258,7 @@ export interface SpawnRunInput {
  */
 export async function spawnRun(deps: SpawnDeps, input: SpawnRunInput): Promise<RunRow> {
 	const { handle, log, launcher } = deps;
-	const { taskId, runId, provider, prompt, repoDir, homeRoot, slug, apiBaseUrl, bearer, resumeSessionId } =
+	const { taskId, runId, provider, prompt, repoDir, homeRoot, slug, apiBaseUrl, bearer, resumeSessionId, skillsMount } =
 		input;
 
 	// Step 1: create (or reuse) the git worktree for this task.
@@ -259,10 +268,18 @@ export async function spawnRun(deps: SpawnDeps, input: SpawnRunInput): Promise<R
 	const homePath = join(homeRoot, String(taskId));
 	mkdirSync(homePath, { recursive: true });
 
+	// Step 2b: mount workflow skills into the per-task HOME (blueprint seam).
+	// Dormant unless the caller passes slugs; the footer points the agent at
+	// the copied SKILL.md files so it follows spec→plan→implement→review.
+	const skillsPrompt =
+		skillsMount && skillsMount.length > 0
+			? appendSkillsFooter(prompt, mountSkills({ homePath, skills: skillsMount }).promptFooter)
+			: prompt;
+
 	// Step 3: build the agent invocation (writes prompt to temp file).
 	const invocation = buildAgentInvocation({
 		provider,
-		prompt,
+		prompt: skillsPrompt,
 		worktreePath: wt.path,
 		homePath,
 		runId,

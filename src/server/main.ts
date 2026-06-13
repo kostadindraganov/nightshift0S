@@ -209,6 +209,7 @@ if (import.meta.main) {
 					prompt: lines.join("\n"),
 					repoDir,
 					homeRoot: config.sandbox.homeRoot,
+					skillsMount: config.coder.skillsMount,
 				};
 			}
 
