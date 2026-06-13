@@ -450,10 +450,29 @@ ready task is skipped, never a pretend spawn). GATE-5 worklist status:
     sandboxed agent needs network to Anthropic); (b) no demo project/task in the DB; (c) `NIGHTSHIFT_REPO_DIR`
     points at the live repo — a real run needs a dedicated target repo. The final push→PR→human-merge is
     outward-facing and needs an explicit target repo + go.
-  - ☐ **Activate the runtime surfaces:** bwrap (2.3) + nftables egress (2.4) + container run (7.1);
-    remote worker daemons (7.2); live CLI update exec (7.3); live preview deploy/reverse-proxy/DNS (7.4);
-    live CMA API + conformance (7.5); prompt-optimize propose/evaluate (7.6); third-reviewer
-    tiebreaker spawn (7.7); real `playwright install` + browser verify (6.B5).
+  - ☑ **CLI auto-update cadence (7.3 LIVE)**: `src/providers/cliUpdateCadence.ts` `startCliUpdateCadence`
+    — wired in `main.ts` onReady (status() every `cliUpdate.checkIntervalHours`, emits `providers.cli_status`;
+    runs updates only when `cliUpdate.enabled` AND a target advertises one). 5 tests (Haiku).
+  - ◑ **Container isolation in spawn (7.1)**: `src/runs/containerSpawn.ts` `makeIsolatedSpawn` built + tested
+    (6, Haiku) — drop-in for `sandboxCoderCommand`, fail-closed off-Linux/no-docker, passthrough when
+    `container.enabled=false`. WIRING PENDING: `spawn.ts` has no `config` in scope; routing the call site
+    (`spawn.ts:302`) through it needs threading `config.container` into `spawnRun`/`startCoderTask`. Deferred
+    (no docker on host + invasive signature change for an unrunnable-here feature).
+  - ◑ **Three-model tiebreaker live spawn (7.7)**: `src/orchestrator/tiebreakerReviewer.ts`
+    `makeTiebreakerReviewer` built + tested (12, Haiku) — satisfies `TiebreakDeps.runTiebreaker` (spawns the
+    third reviewer one-shot, fail-closed-to-stricter). WIRING PENDING: `resolveWithTiebreak` works on two
+    parsed `Verdict`s, but the live tournament path synthesizes at the stdout level — connecting needs a
+    Verdict-level review-round restructure (architectural).
+  - ◑ **Experiment live deps (6.A4/6.D3)**: `dispatchExperiment` exists but has no invocation caller, so the
+    live deps (`makeLiveExperimentDeps`) were deferred to avoid dead code. NEXT: add an HTTP route (POST
+    /routines/:id/experiment) that calls `dispatchExperiment(..., {experimentDeps: makeLiveExperimentDeps(...)})`,
+    + the live git/eval/agent deps (eval on a read-only worktree OUTSIDE target_paths §3.12.8).
+  - ☐ **Remaining runtime surfaces:** bwrap (2.3, works) + nftables egress (2.4 — needs a SEPARATE agent uid:
+    control plane + agents share uid 1000, so a uid-scoped DROP would filter the control plane); container
+    runtime (docker/podman absent); remote worker daemons (7.2 — needs other machines); live preview
+    deploy/reverse-proxy/DNS (7.4); live CMA API + conformance (7.5 — needs key); prompt-optimize
+    propose/evaluate (7.6 — needs a dispatcher + persistence-schema decision first); `playwright install`
+    + browser verify (6.B5 — package not installed, gate off by default).
 
 ---
 

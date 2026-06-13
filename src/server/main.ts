@@ -41,6 +41,8 @@ import type { SpawnPlan } from "../scheduler/scheduler.ts";
 import { startCoderCompletionTrigger } from "../orchestrator/coderCompletionTrigger.ts";
 import { startReviewTrigger } from "../orchestrator/reviewTrigger.ts";
 import { startAgentsMdCadence } from "../maintenance/agentsMdCadence.ts";
+import { startCliUpdateCadence } from "../providers/cliUpdateCadence.ts";
+import { cliUpdater } from "../providers/cliUpdate.ts";
 import { makeEvidenceResolveSpawn } from "../orchestrator/evidenceRouting.ts";
 import type { RepoConfig } from "../orchestrator/coder.ts";
 
@@ -384,6 +386,17 @@ if (import.meta.main) {
 				resolveRepoDir,
 			});
 				shutdownTasks.push(() => agentsMdCadence.stop());
+
+			// ── CLI auto-update cadence (7.3) — refresh provider CLI version status ─
+			// status() every checkIntervalHours; runs updates only when the operator
+			// enabled them (config.cliUpdate.enabled) AND a target advertises one.
+			const cliUpdateCadence = startCliUpdateCadence({
+				updater: cliUpdater,
+				intervalMs: config.cliUpdate.checkIntervalHours * 60 * 60 * 1000,
+				log: events,
+				runUpdates: config.cliUpdate.enabled,
+			});
+			shutdownTasks.push(() => cliUpdateCadence.stop());
 
 			// Start the unattended scheduler loop with the wired host closures
 			// (resolveSpawn wrapped by the evidence router).
