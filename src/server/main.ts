@@ -123,6 +123,29 @@ export function createServer(options: CreateServerOptions = {}): Bun.Server<Term
 }
 
 if (import.meta.main) {
+	// Coordinated shutdown. Registering ANY process.on("SIGINT"/"SIGTERM")
+	// handler overrides Bun's default "terminate on Ctrl+C", so we now own
+	// teardown: stop every background loop, CLOSE the HTTP server (its open
+	// socket otherwise keeps the event loop — and the bun process — alive),
+	// then process.exit. The `shuttingDown` guard makes repeated Ctrl+C a
+	// no-op instead of re-running every stop() (the source of the spam).
+	const shutdownTasks: Array<() => void> = [];
+	let shuttingDown = false;
+	function shutdown(signal: string): void {
+		if (shuttingDown) return;
+		shuttingDown = true;
+		console.log(`\n${signal} received — shutting down…`);
+		for (const stop of shutdownTasks) {
+			try {
+				stop();
+			} catch (err) {
+				console.error("shutdown task failed:", err instanceof Error ? err.message : err);
+			}
+		}
+		server.stop(true); // force-close active connections so the socket releases
+		process.exit(0);
+	}
+
 	// resolveRepoDir: maps a project's repoUrl to a local checkout path.
 	// NIGHTSHIFT_REPO_DIR overrides for single-repo deployments; otherwise
 	// derives <NIGHTSHIFT_CHECKOUT_ROOT>/<owner>/<repo> from the remote URL.
@@ -158,8 +181,7 @@ if (import.meta.main) {
 					httpSend: fetchHttpSend,
 					now: () => new Date(),
 				});
-				process.on("SIGTERM", () => v2.stop());
-				process.on("SIGINT", () => v2.stop());
+				shutdownTasks.push(() => v2.stop());
 			} catch (err) {
 				console.error("V2 loops failed to start:", err instanceof Error ? err.message : err);
 			}
@@ -286,7 +308,7 @@ if (import.meta.main) {
 					resolveMergeContext,
 				});
 				const hook = startAutoMergeHook({ log: events, autoMergeDeps });
-				process.on("SIGTERM", () => hook.stop());
+				shutdownTasks.push(() => hook.stop());
 			} else {
 				void makeResolveMergeContext;
 				void makeAutoMergeDeps;
@@ -340,8 +362,7 @@ if (import.meta.main) {
 				log: events,
 				resolveRepo: (task) => resolveRepoConfig(task),
 			});
-			process.on("SIGTERM", () => coderCompletion.stop());
-			process.on("SIGINT", () => coderCompletion.stop());
+				shutdownTasks.push(() => coderCompletion.stop());
 
 			// ── GATE-5: review-round trigger (closes GATE-3 live) ────────────────
 			// On a task → review, spawn the reviewer and run one ping-pong round.
@@ -353,8 +374,7 @@ if (import.meta.main) {
 					? { repoDir: process.env.NIGHTSHIFT_REPO_DIR }
 					: {}),
 			});
-			process.on("SIGTERM", () => reviewTrigger.stop());
-			process.on("SIGINT", () => reviewTrigger.stop());
+				shutdownTasks.push(() => reviewTrigger.stop());
 
 			// ── AGENTS.md upkeep cadence (6.B4/6.D4) — advisory proposals every 6h ─
 			const agentsMdCadence = startAgentsMdCadence({
@@ -363,8 +383,7 @@ if (import.meta.main) {
 				intervalMs: 6 * 60 * 60 * 1000,
 				resolveRepoDir,
 			});
-			process.on("SIGTERM", () => agentsMdCadence.stop());
-			process.on("SIGINT", () => agentsMdCadence.stop());
+				shutdownTasks.push(() => agentsMdCadence.stop());
 
 			// Start the unattended scheduler loop with the wired host closures
 			// (resolveSpawn wrapped by the evidence router).
@@ -377,8 +396,7 @@ if (import.meta.main) {
 				runActivity,
 			})
 				.then((loop) => {
-					process.on("SIGTERM", () => loop.stop());
-					process.on("SIGINT", () => loop.stop());
+					shutdownTasks.push(() => loop.stop());
 					console.log("nightshift scheduler loop started");
 				})
 				.catch((err) => {
@@ -386,5 +404,7 @@ if (import.meta.main) {
 				});
 		},
 	});
+	process.on("SIGINT", () => shutdown("SIGINT"));
+	process.on("SIGTERM", () => shutdown("SIGTERM"));
 	console.log(`nightshift listening on ${server.url}`);
 }
