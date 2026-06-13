@@ -157,6 +157,8 @@ export const TABLE_NAMES = {
 	triggers: "triggers",
 	experimentLedger: "experiment_ledger",
 	settings: "settings",
+	// V2 (Phase 6): per-project agent memory (accumulated learnings).
+	agentMemory: "agent_memory",
 } as const;
 
 /**
@@ -176,4 +178,6 @@ export const INDEX_NAMES = {
 	eventsTask: "events_task_idx",
 	promptsNameVersion: "prompts_name_version_idx",
 	settingsScopeKey: "settings_scope_key_idx",
+	// V2 (Phase 6): one memory row per (project, namespace, key).
+	agentMemoryProjectKey: "agent_memory_project_key_idx",
 } as const;

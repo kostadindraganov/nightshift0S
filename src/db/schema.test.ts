@@ -51,7 +51,7 @@ function runValues(taskId: number, state: RunInsert["state"]): RunInsert {
 	return { taskId, kind: "coder", provider: "claude", model: "opus", authLane: "subscription", state };
 }
 
-test("migration applies clean on a fresh DB (all 13 tables exist)", () => {
+test("migration applies clean on a fresh DB (all 14 tables exist)", () => {
 	const names = handle.sqlite
 		.query<{ name: string }, []>(
 			"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '__drizzle_migrations' ORDER BY name",
@@ -59,6 +59,7 @@ test("migration applies clean on a fresh DB (all 13 tables exist)", () => {
 		.all()
 		.map((r) => r.name);
 	expect(names).toEqual([
+		"agent_memory",
 		"events",
 		"experiment_ledger",
 		"findings",

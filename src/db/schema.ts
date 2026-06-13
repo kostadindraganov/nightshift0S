@@ -352,6 +352,32 @@ export const settings = sqliteTable(
 	(t) => [uniqueIndex(INDEX_NAMES.settingsScopeKey).on(t.scope, t.scopeId, t.key)],
 );
 
+/**
+ * V2 (Phase 6): per-project agent memory — accumulated learnings the factory
+ * carries across runs (e.g. "this repo's tests need NODE_ENV=test"). Key-value
+ * within a namespace, upserted per (project, namespace, key). Code/output may be
+ * referenced; secret values must NOT be stored here (§3.12.7) — references only,
+ * same rule as `settings`.
+ */
+export const agentMemory = sqliteTable(
+	TABLE_NAMES.agentMemory,
+	{
+		id: integer("id").primaryKey({ autoIncrement: true }),
+		projectId: integer("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		// Grouping bucket (e.g. "lessons", "conventions", "facts"). Default "note".
+		namespace: text("namespace").notNull().default("note"),
+		key: text("key").notNull(),
+		valueJson: text("value_json").notNull(),
+		// Provenance: `agent:<provider>`, `run:<id>`, `human:<user>`, `system`.
+		source: text("source").notNull(),
+		createdAt: text("created_at").notNull(),
+		updatedAt: text("updated_at").notNull(),
+	},
+	(t) => [uniqueIndex(INDEX_NAMES.agentMemoryProjectKey).on(t.projectId, t.namespace, t.key)],
+);
+
 export type ProjectRow = typeof projects.$inferSelect;
 export type ProjectInsert = typeof projects.$inferInsert;
 export type TaskRow = typeof tasks.$inferSelect;
@@ -378,3 +404,5 @@ export type ExperimentLedgerRow = typeof experimentLedger.$inferSelect;
 export type ExperimentLedgerInsert = typeof experimentLedger.$inferInsert;
 export type SettingRow = typeof settings.$inferSelect;
 export type SettingInsert = typeof settings.$inferInsert;
+export type AgentMemoryRow = typeof agentMemory.$inferSelect;
+export type AgentMemoryInsert = typeof agentMemory.$inferInsert;

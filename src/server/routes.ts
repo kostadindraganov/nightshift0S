@@ -22,7 +22,11 @@ import { transcriptRoutes } from "../runs/transcriptRoutes.ts";
 import { authHealthRoutes } from "../providers/authHealthRoutes.ts";
 import { triggerRoutes } from "../triggers/triggerRoutes.ts";
 import { webhookRoutes } from "../triggers/webhookRoutes.ts";
+import { chatRoutes } from "../triggers/chatRoutes.ts";
 import { experimentRoutes } from "../experiment/experimentRoutes.ts";
+import { memoryRoutes } from "../memory/memoryRoutes.ts";
+import { analyticsRoutes } from "../analytics/analyticsRoutes.ts";
+import { agentsMdRoutes } from "../maintenance/agentsMdRoutes.ts";
 import { makeReviewRoutes, type ReviewRoutesConfig } from "./reviewRoutes.ts";
 import { makePlannerRoutes, type PlannerRoutesConfig } from "./plannerRoutes.ts";
 import type { ReviewDeps } from "../orchestrator/review.ts";
@@ -639,6 +643,14 @@ export const routes: Route[] = [
 	...triggerRoutes,
 	// -- webhook trigger ingress (HMAC-signed, Phase 6, §3.12.6) ---------------
 	...webhookRoutes,
+	// -- chat trigger ingress (Telegram inbound, Phase 6, §3.2/§3.12.6) --------
+	...chatRoutes,
+	// -- per-project agent memory (Phase 6, §3 Memory) ------------------------
+	...memoryRoutes,
+	// -- analytics + evidence-based routing (Phase 6, §3.7) -------------------
+	...analyticsRoutes,
+	// -- AGENTS.md auto-maintenance proposal (Phase 6) ------------------------
+	...agentsMdRoutes,
 	// -- review (thread / findings / review-round / verdict) -------------------
 	...makeReviewRoutes({ buildDeps: buildReviewDeps }),
 	// -- planner (project bootstrap) -------------------------------------------

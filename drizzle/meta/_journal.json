@@ -8,6 +8,13 @@
       "when": 1781086919731,
       "tag": "0001_majestic_marrow",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1781366663090,
+      "tag": "0002_white_cerise",
+      "breakpoints": true
     }
   ]
 }

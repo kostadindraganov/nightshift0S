@@ -267,12 +267,30 @@ Telegram HttpSend), then verify the morning digest shows merged PRs.
     READ-ONLY checkout OUTSIDE target_paths), `GET /runs/:id/experiment` timeline +
     metric series + best. 54 tests. Loop run + ledger UI = GATE 5 (needs agent spawn).
 
-**Batch B remaining ☐:** webhook CHAT triggers (Telegram inbound) + per-project agent
-memory + AGENTS.md auto-maintenance + analytics & evidence-based routing + Playwright
-verification (opt-in, web projects only) + spec-first/plan-review flow. UI for the
-experiment ledger (timeline + metric chart, the "progress.png" moment) ships when live
-experiment runs exist (GATE 5). Boot-wiring of the channels/digest/experiment-loop
-seams lands in main.ts alongside the other §8 live wiring.
+**Batch B DONE ☑ (2026-06-13, built & logic-tested on macOS; typecheck clean):**
+6.B1 ☑ Per-project agent memory (§3 Memory & knowledge) — NEW `agent_memory` table
+    (migration 0002, the 14th table) + `src/memory/{memory,memoryRoutes}.ts`:
+    namespaced key-value upsert per project, fail-closed (project_not_found/invalid),
+    audit events, secrets-not-stored. GET/PUT/DELETE /projects/:id/memory. 26 tests.
+6.B2 ☑ Analytics + evidence-based routing (§3.7) — `src/analytics/{aggregate,routing}.ts`:
+    per-provider success/cost/latency aggregates + factory overview + a deterministic
+    evidence scorer (cold-start guarded) the scheduler MAY consult; GET /analytics. 30 tests.
+6.B3 ☑ Chat triggers / Telegram inbound (§3.2/§3.12.6) — `src/triggers/{chat,chatRoutes}.ts`:
+    POST /chat/telegram/:id (secret-token auth), allowlist/dedupe/rate-limit → fireTrigger
+    (source=chat, honors dry-run); token never logged. 35 tests.
+6.B4 ☑ AGENTS.md auto-maintenance (§3) — `src/maintenance/agentsMd.ts`: marker-delimited
+    managed block (preserves hand-written prose), deterministic proposal from a repo
+    snapshot, optional injected LLM refine; GET /projects/:id/agents-md/proposal. 36 tests.
+6.B5 ☑ Playwright verification, opt-in (§3.10 item 8) — `src/verify/{browser,verifyGate}.ts`:
+    opt-in-per-project gate (NEVER a default), injectable BrowserRunner + LAZY playwright
+    adapter (fail-closed when absent — real browser install = GATE 5), fail-closed verdicts
+    (unrunnable ⇒ fail, never pass). 11 tests.
+
+**Phase 6 remaining ☐:** spec-first / plan-review flow; experiment ledger UI (timeline +
+metric chart — ships when live experiment runs exist); real `playwright install` + live
+browser verify (GATE 5); main.ts boot-wiring of the live V2 seams (channels/digest/experiment
+loop, chat/webhook receivers, evidence-routing into resolveSpawn, live repo scan for AGENTS.md);
+UI for memory/analytics/routines/transcript panels. These are GATE-5/runtime or UI polish.
 
 ## Phase 7 — V3
 Container isolation per run, multi-VM workers, CLI auto-update,
