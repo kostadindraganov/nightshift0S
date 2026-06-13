@@ -247,11 +247,32 @@ typecheck clean). Factory unattended-live overnight on Linux host = pending: boo
 live seams (resolveSpawn, produceFinder specialist spawn, cron/notifier timers in main.ts,
 Telegram HttpSend), then verify the morning digest shows merged PRs.
 
-## Phase 6 — V2 (listed; spec in BLUEPRINT §4 step 6)
-Webhook/chat triggers, Playwright verification (opt-in), per-project agent
-memory, AGENTS.md auto-maintenance, analytics + evidence-based routing,
-Slack/email channels + standup digest, spec-first + plan review, rubric &
-design-review judge plug-ins, experiment routines + ledger UI (§3.11).
+## Phase 6 — V2 (spec in BLUEPRINT §4 step 6)
+**Batch A DONE ☑ (2026-06-13, built & logic-tested on macOS; 916 tests, typecheck clean):**
+6.A1 ☑ Rubric + design-review judge plug-ins (§3.10.1) — `rubricJudge` (grades an
+    artifact against a routine rubric §3.5) + `designJudge` (UX/a11y review §3.8)
+    implemented in `src/review/judge.ts`, injection-safe, fail-closed parse, same
+    Verdict contract → plug straight into the existing `runVerdict` engine. 27 tests.
+6.A2 ☑ Slack/email channels + standup digest (§3.10.4/§3.5) — `src/notify/{slack,
+    email,digest}.ts`: two more channels behind the one notifier (fail-closed when
+    unconfigured, secrets never in reasons), `buildStandupDigest` (done/failed/
+    needs_human/merged/spend/flaky/topErrors) + scheduler. 21 tests.
+6.A3 ☑ Webhook triggers (§3.12.6) — `src/triggers/{webhook,webhookRoutes}.ts`:
+    HMAC-SHA256 constant-time verify + 7-gate fail-closed gauntlet (kind/authz/
+    signature/dedupe/rate-limit → fireTrigger honoring dry-run); `POST /webhooks/:id`
+    (auth via HMAC, not bearer). 32 tests. node:crypto, no new dep.
+6.A4 ☑ Experiment routines + ledger (§3.11/§3.12.8) — `src/experiment/{ledger,
+    engine}.ts`: hill-climbing loop (edit→commit→eval-under-budget→parse metric→
+    keep/discard→ledger; NEVER-STOP; crash never advances the branch; eval runs on a
+    READ-ONLY checkout OUTSIDE target_paths), `GET /runs/:id/experiment` timeline +
+    metric series + best. 54 tests. Loop run + ledger UI = GATE 5 (needs agent spawn).
+
+**Batch B remaining ☐:** webhook CHAT triggers (Telegram inbound) + per-project agent
+memory + AGENTS.md auto-maintenance + analytics & evidence-based routing + Playwright
+verification (opt-in, web projects only) + spec-first/plan-review flow. UI for the
+experiment ledger (timeline + metric chart, the "progress.png" moment) ships when live
+experiment runs exist (GATE 5). Boot-wiring of the channels/digest/experiment-loop
+seams lands in main.ts alongside the other §8 live wiring.
 
 ## Phase 7 — V3
 Container isolation per run, multi-VM workers, CLI auto-update,
