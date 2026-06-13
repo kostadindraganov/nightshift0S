@@ -391,6 +391,47 @@ export function makeRunReviewer(deps: LiveDeps): ReviewDeps["runReviewer"] {
 }
 
 /**
+ * Build the §3.4 specialist-finder producer for one task: each call spawns a
+ * captured reviewer one-shot with the specialist's prompt and returns its raw
+ * stdout for the harness to parse. Finders are READ-ONLY (no run row, no commit,
+ * no headSha re-resolve) — they only read the diff in the prompt.
+ *
+ * FAIL-SOFT per finder: a missing coder worktree or a spawn failure returns "" so
+ * that ONE bad finder is recorded by the harness as a parse-failure (not fatal)
+ * rather than rejecting the whole Promise.all. When EVERY finder returns "" the
+ * harness fail-closes to "block" (no evidence ⇒ never approve), which is correct.
+ */
+export function makeProduceFinder(
+	deps: LiveDeps,
+	task: TaskRow,
+): (kind: string, prompt: string) => Promise<string> {
+	const spawner = deps.spawner ?? spawnOneShotCaptured;
+	const provider = deps.reviewerProvider ?? "codex";
+	const homeRoot = deps.homeRoot ?? defaultHomeRoot();
+
+	return async (_kind: string, prompt: string): Promise<string> => {
+		const wt = latestCoderWorktree(deps.handle, task.id);
+		if (wt === null) return ""; // no worktree to review → no evidence (harness blocks if all fail)
+		const home = `${homeRoot}/${task.id}`;
+		try {
+			const result = await spawner({
+				argv: buildOneShotArgv(provider),
+				prompt,
+				cwd: wt,
+				home,
+				providerAuthDir: providerAuthDir(home, provider),
+			});
+			return result.stdout;
+		} catch (err) {
+			console.warn(
+				`[produceFinder] specialist spawn failed for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`,
+			);
+			return ""; // fail-soft: empty stdout → harness records a failed finder
+		}
+	};
+}
+
+/**
  * Like `makeRunReviewer` but wraps the result in tournament mode:
  * spawns a second challenger reviewer in parallel and synthesizes the union.
  * Falls back gracefully: if either runner errors, the other's output is used.

@@ -249,6 +249,18 @@ export const REGISTRY: Record<string, RegistryEntry> = {
 			return { ok: true };
 		},
 	},
+	"review.specialistHarness": {
+		key: "review.specialistHarness",
+		configPath: "review.specialistHarness",
+		type: "boolean",
+		scopes: ["global", "project", "routine"],
+		secret: false,
+		defaultValue: DEFAULT_CONFIG.review.specialistHarness,
+		validate(v) {
+			if (!isBoolean(v)) return { ok: false, reason: "must be a boolean" };
+			return { ok: true };
+		},
+	},
 	// -- coder -----------------------------------------------------------------
 	"coder.skillsMount": {
 		key: "coder.skillsMount",

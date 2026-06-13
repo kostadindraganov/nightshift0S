@@ -75,6 +75,10 @@ export interface NightshiftConfig {
 	review: {
 		maxRounds: number;
 		autoMergeEnabled: boolean;
+		/** When true, the review trigger uses the §3.4 specialist-finder harness
+		 * (parallel risk-tiered finders → coordinator) instead of the single-judge
+		 * reviewer. Default false. */
+		specialistHarness: boolean;
 	};
 	sandbox: {
 		homeRoot: string;
@@ -230,6 +234,7 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
 	review: {
 		maxRounds: 3,
 		autoMergeEnabled: false,
+		specialistHarness: false,
 	},
 	sandbox: {
 		homeRoot: "/tmp/nightshift-sandboxes",

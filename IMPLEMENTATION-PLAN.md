@@ -427,9 +427,14 @@ ready task is skipped, never a pretend spawn). GATE-5 worklist status:
   - All three modules built via multi-agent workflow + tested (21 new tests, all green; full suite
     1177 pass / 4 pre-existing bwrap-on-Linux fails; typecheck clean). Service restarted & verified
     live (scheduler loop + 3 triggers running; /healthz + /readyz ok).
-  - ☐ **Wire remaining host closures:** `produceFinder` specialist spawn (5.6 — §3.4 harness needs a
-    harness-based review round, not the single-judge `runReviewRound`), experiment-run dispatch
-    (6.A4/6.D3 — scheduler has no experiment-kind branch yet; needs a run-creation seam).
+  - ☑ **`produceFinder` specialist spawn + §3.4 harness review path (5.6 LIVE)**: `liveSpawn.makeProduceFinder`
+    (one captured reviewer one-shot per specialist, fail-soft → "" so the harness's all-fail⇒block
+    invariant holds) + `src/orchestrator/harnessReview.ts` `runHarnessReviewRound` (runs the risk-tiered
+    parallel finders via `runReviewHarness` → `toVerdictShape`, then persist/apply mirroring
+    `runReviewRound`). Selected per new `config.review.specialistHarness` flag (default false; editable
+    registry knob added); `reviewTrigger` branches single-judge vs harness. 6 tests (Haiku), all green.
+  - ☐ **Wire remaining host closures:** experiment-run dispatch (6.A4/6.D3 — scheduler has no
+    experiment-kind branch yet; needs a run-creation seam — deferred, needs an architectural decision).
   - ☐ **Run the "fix typo" task end-to-end** per `docs/LINUX-DEPLOY.md`: real spawn → push → PR →
     review ping-pong → human merge → dependents unblock (closes GATE 2/3/4 live). The triggers are
     now wired and inert until a live coder run actually succeeds (needs bwrap/egress active).

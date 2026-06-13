@@ -27,8 +27,12 @@ import {
 	makeRunReviewer,
 	makeTournamentReviewer,
 	makeResumeCoder,
+	makeProduceFinder,
 } from "../runs/liveSpawn.ts";
 import { TmuxLauncher } from "../runs/launcher.ts";
+import { runHarnessReviewRound, type HarnessReviewDeps } from "./harnessReview.ts";
+import type { TaskRow } from "../db/schema.ts";
+import type { HarnessDeps } from "../review/harness.ts";
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -50,6 +54,12 @@ export interface ReviewTriggerDeps {
 	 * avoid real spawns, git calls, or DB side effects.
 	 */
 	buildReviewDeps?: (deps: ReviewTriggerDeps) => ReviewDeps;
+	/**
+	 * Injectable factory for the §3.4 specialist-finder producer (per task). Used
+	 * ONLY when config.review.specialistHarness is true. Production default builds
+	 * the live one-shot spawner (liveSpawn.makeProduceFinder); tests inject a fake.
+	 */
+	makeProduceFinder?: (task: TaskRow) => HarnessDeps["produceFinder"];
 }
 
 export interface ReviewTriggerHandle {
@@ -92,6 +102,21 @@ function defaultBuildReviewDeps(deps: ReviewTriggerDeps): ReviewDeps {
 		}),
 		maxRounds: config.review.maxRounds,
 	};
+}
+
+/**
+ * Production default for the specialist-finder producer factory. Builds the same
+ * LiveDeps base as defaultBuildReviewDeps and binds liveSpawn.makeProduceFinder
+ * per task. Only used on the harness path.
+ */
+function defaultMakeProduceFinder(
+	deps: ReviewTriggerDeps,
+): (task: TaskRow) => HarnessDeps["produceFinder"] {
+	const { handle, log, config } = deps;
+	const reviewerProvider = deps.reviewerProvider ?? config.providers.defaultReviewer;
+	const homeRoot = config.sandbox.homeRoot;
+	const liveDepsBase = { handle, log, homeRoot, reviewerProvider };
+	return (task: TaskRow) => makeProduceFinder(liveDepsBase, task);
 }
 
 // ---------------------------------------------------------------------------
@@ -158,17 +183,31 @@ export function startReviewTrigger(deps: ReviewTriggerDeps): ReviewTriggerHandle
 			const taskId = event.taskId;
 
 			// Assemble live ReviewDeps and run the review round, fail-closed.
+			// Branch on config.review.specialistHarness: the §3.4 parallel-finder
+			// harness round vs. the single-judge round. Same Verdict contract either way.
 			try {
 				const reviewDeps = buildDeps(deps);
-				const outcome = await runReviewRound(reviewDeps, taskId);
+				const useHarness = deps.config.review.specialistHarness;
+				let outcome;
+				if (useHarness) {
+					const makeFinder = deps.makeProduceFinder ?? defaultMakeProduceFinder(deps);
+					const harnessDeps: HarnessReviewDeps = {
+						...reviewDeps,
+						makeProduceFinder: makeFinder,
+					};
+					outcome = await runHarnessReviewRound(harnessDeps, taskId);
+				} else {
+					outcome = await runReviewRound(reviewDeps, taskId);
+				}
 				if (!outcome.ok) {
-					console.warn("[reviewTrigger] runReviewRound returned not-ok", {
+					console.warn("[reviewTrigger] review round returned not-ok", {
 						taskId,
 						reason: outcome.reason,
+						harness: useHarness,
 					});
 				}
 			} catch (err) {
-				console.error("[reviewTrigger] runReviewRound threw — continuing loop", {
+				console.error("[reviewTrigger] review round threw — continuing loop", {
 					taskId,
 					err: err instanceof Error ? err.message : String(err),
 				});
