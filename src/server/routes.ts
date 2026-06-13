@@ -27,6 +27,9 @@ import { experimentRoutes } from "../experiment/experimentRoutes.ts";
 import { memoryRoutes } from "../memory/memoryRoutes.ts";
 import { analyticsRoutes } from "../analytics/analyticsRoutes.ts";
 import { agentsMdRoutes } from "../maintenance/agentsMdRoutes.ts";
+import { workersRoutes } from "../scheduler/workersRoutes.ts";
+import { cliUpdateRoutes } from "../providers/cliUpdateRoutes.ts";
+import { previewRoutes } from "../preview/previewRoutes.ts";
 import { makeReviewRoutes, type ReviewRoutesConfig } from "./reviewRoutes.ts";
 import { makePlannerRoutes, type PlannerRoutesConfig } from "./plannerRoutes.ts";
 import type { ReviewDeps } from "../orchestrator/review.ts";
@@ -659,6 +662,12 @@ export const routes: Route[] = [
 	...analyticsRoutes,
 	// -- AGENTS.md auto-maintenance proposal (Phase 6) ------------------------
 	...agentsMdRoutes,
+	// -- multi-VM worker registry (Phase 7 V3, §infra) ------------------------
+	...workersRoutes,
+	// -- CLI auto-update / version status (Phase 7 V3, §infra) ----------------
+	...cliUpdateRoutes,
+	// -- preview environments (Phase 7 V3, §infra) ---------------------------
+	...previewRoutes,
 	// -- review (thread / findings / review-round / verdict) -------------------
 	...makeReviewRoutes({ buildDeps: buildReviewDeps }),
 	// -- planner (project bootstrap) -------------------------------------------

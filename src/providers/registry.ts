@@ -29,6 +29,7 @@ import { opencode } from "./opencode.ts";
 import { antigravity } from "./antigravity.ts";
 import { openrouter } from "./openrouter.ts";
 import { local } from "./local.ts";
+import { cma } from "./cma.ts";
 
 /** One registry row: a driver, the probe suite that gates it, and its enable knob. */
 export interface DriverRegistryEntry {
@@ -56,4 +57,6 @@ export const DRIVER_REGISTRY: DriverRegistryEntry[] = [
 	{ driver: antigravity, probes: PROBES, enabledKnob: "providers.antigravityEnabled", authMode: "api_key" },
 	{ driver: openrouter, probes: PROBES, enabledKnob: "providers.openrouterEnabled", authMode: "api_key" },
 	{ driver: local, probes: PROBES, enabledKnob: "providers.localEnabled", authMode: "api_key" },
+	// V3 CMA (Anthropic Managed Agents) provider plugin — api driver, default OFF.
+	{ driver: cma, probes: PROBES, enabledKnob: "providers.cmaEnabled", authMode: "api_key" },
 ];

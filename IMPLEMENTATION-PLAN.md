@@ -321,9 +321,51 @@ optional transcript tab in TaskDetailView. Everything code-able on the dev host 
 green, and wired; what is left needs the Linux runtime + real provider/GitHub/browser surfaces.
 
 ## Phase 7 — V3
-Container isolation per run, multi-VM workers, CLI auto-update,
-Forgejo/GitLab plugins, preview environments, CMA provider plugin,
-tournament flag, prompt self-optimization.
+**Forge plugins + tournament + transcript DONE ☑ (2026-06-13, commit 5675c4b):**
+7.0 ☑ Transcript tab (TaskDetailView 4th tab), Forgejo + GitLab forge plugins
+    (`src/forge/{forgejoForgeClient,gitlabForgeClient,forgeFactory}.ts`, dispatch on
+    config.forge.provider), tournament mode (`src/review/tournament.ts` dual-reviewer
+    synthesis behind config.tournament.enabled).
+
+**V3 build DONE ☑ (2026-06-13, built & logic-tested on macOS; 1160 tests pass, typecheck
+clean, frontend bundles). 8-agent fan-out (Sonnet/Opus/Haiku), ZERO migrations:**
+7.1 ☑ Container isolation per run (§infra) — `src/sandbox/container.ts`: `buildContainerArgv`
+    (network/mem/cpu limits, `--network none` default, NO host-env leak) + `makeContainerRunner`
+    (FAIL-CLOSED off-Linux via `ContainerUnavailableError`). Opt-in level ABOVE worktree-only.
+    6 tests. Run-spawn integration = GATE-5/runtime.
+7.2 ☑ Multi-VM workers (§infra) — `src/scheduler/{workers,workersRoutes}.ts`: in-memory
+    `WorkerRegistry` (register/heartbeat/list/reclaimStale, lease-based liveness — NO DB/migration)
+    + GET/POST /workers, POST /workers/:id/heartbeat. 6 tests. Remote daemons + scheduler
+    consumption = GATE-5.
+7.3 ☑ CLI auto-update + version status (§infra) — `src/providers/{cliUpdate,cliUpdateRoutes}.ts`:
+    `parseSemver`/`needsUpdate` (fail-soft) + `makeCliUpdater` (status/update, NEVER throws) +
+    GET /providers/cli-status (sibling to authHealth). 6 tests. Live update exec = GATE-5.
+7.4 ☑ Preview environments (§infra) — `src/preview/{preview,previewRoutes}.ts`: URL allocation
+    (`run-<id>.<domain>`, fail-closed on empty domain) + lifecycle state machine + idle reaper,
+    injectable `Deployer` (`FailClosedDeployer` default) + GET/POST/DELETE /previews. 7 tests.
+    Live deploy/reverse-proxy/DNS = GATE-5.
+7.5 ☑ CMA provider plugin (§3 managed agents) — `src/providers/cma.ts`: Anthropic Managed
+    Agents as an `api` ProviderDriver THROUGH conformance (injectable fetch, model-required-or-
+    refuse, key in `x-api-key` header never logged); registered in DRIVER_REGISTRY behind
+    `providers.cmaEnabled` (default OFF). Env: CMA_MODEL / CMA_API_KEY / CMA_BASE_URL. 8 tests.
+    Live CMA API + conformance = GATE-5.
+7.6 ☑ Prompt self-optimization (§3.11 V3 variant) — `src/experiment/promptOptimize.ts`:
+    hill-climb over a PROMPT (propose→evaluate→keep-iff-strictly-better→ledger), same crash-safe
+    NEVER-STOP discipline as the code experiment engine. 5 tests. Live propose/evaluate = GATE-5.
+7.7 ☑ Three-model tiebreaker (§3.10 review) — `src/review/tiebreaker.ts`: when the two tournament
+    reviewers disagree (verdict approved vs revise), an injected third model breaks the tie;
+    FAIL-CLOSED to the stricter verdict (revise wins) when no tiebreaker; injection-sanitized.
+    6 tests. config.tournament.tiebreakerProvider + live third-reviewer spawn = GATE-5.
+7.8 ☑ Infra dashboard UI — `web/views/InfraView.tsx` + "Infra" nav (8 tabs): read-only
+    workers / preview-envs / CLI-status panels.
+
+Config added (57 leaves total): container/workers/cliUpdate/preview/selfOptimize sections +
+providers.cma{Enabled,Model} + tournament.tiebreakerProvider. Per-agent log: docs/PHASE7-PROGRESS.md.
+
+**Phase 7 remaining ☐ — GATE-5 only (physically not validatable on macOS):** real docker/podman
+run-spawn integration, remote worker daemons pulling the queue, live CLI update exec, live preview
+deploy/reverse-proxy/DNS, live CMA API + conformance, live third-reviewer spawn. Every code-able
+surface is built, green, and wired; what remains needs the Linux runtime + real provider/infra surfaces.
 
 ---
 

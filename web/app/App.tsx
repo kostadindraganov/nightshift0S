@@ -13,6 +13,7 @@ import RoutinesView from "../views/RoutinesView.tsx";
 import AnalyticsView from "../views/AnalyticsView.tsx";
 import MemoryView from "../views/MemoryView.tsx";
 import ExperimentView from "../views/ExperimentView.tsx";
+import InfraView from "../views/InfraView.tsx";
 import TaskDetailView from "../views/TaskDetailView.tsx";
 
 // ── Token gate ────────────────────────────────────────────────
@@ -65,7 +66,7 @@ function TokenGate() {
 // ── App ───────────────────────────────────────────────────────
 export default function App() {
   const [view, setView] = useState<
-    "board" | "intake" | "routines" | "analytics" | "memory" | "experiments" | "settings"
+    "board" | "intake" | "routines" | "analytics" | "memory" | "experiments" | "infra" | "settings"
   >("board");
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
 
@@ -105,6 +106,8 @@ export default function App() {
         <MemoryView />
       ) : view === "experiments" ? (
         <ExperimentView />
+      ) : view === "infra" ? (
+        <InfraView />
       ) : (
         <SettingsView />
       )}

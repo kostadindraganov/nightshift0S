@@ -269,3 +269,28 @@ export interface TranscriptEvent {
   redacted?: boolean;
   payload: unknown;
 }
+
+// ── Infra dashboard (Phase 7 V3, §infra) ───────────────────────
+export interface WorkerRow {
+  id: string;
+  host: string;
+  capacity: number;
+  lastHeartbeat: number;
+  alive: boolean;
+}
+
+export interface PreviewRow {
+  runId: number;
+  url: string;
+  status: string;
+  createdAt: number;
+  lastActiveAt: number;
+}
+
+export interface CliStatusRow {
+  provider: string;
+  bin: string;
+  installed: string | null;
+  latest: string | null;
+  updateAvailable: boolean;
+}

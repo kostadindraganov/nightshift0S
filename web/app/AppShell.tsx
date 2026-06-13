@@ -9,6 +9,7 @@ type View =
   | "analytics"
   | "memory"
   | "experiments"
+  | "infra"
   | "settings";
 
 interface AppShellProps {
@@ -25,6 +26,7 @@ const NAV_ITEMS: { id: View; label: string }[] = [
   { id: "analytics", label: "Analytics" },
   { id: "memory", label: "Memory" },
   { id: "experiments", label: "Experiments" },
+  { id: "infra", label: "Infra" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -35,6 +37,7 @@ const VIEW_TITLES: Record<View, string> = {
   analytics: "Analytics",
   memory: "Memory",
   experiments: "Experiments",
+  infra: "Infra",
   settings: "Settings",
 };
 

@@ -43,6 +43,10 @@ export interface NightshiftConfig {
 		localBaseUrl: string;
 		// localModel: unset ⇒ runOnce refuses.
 		localModel: string;
+		// V3 CMA (Anthropic Managed Agents) provider plugin — api driver, default OFF.
+		cmaEnabled: boolean;
+		// cmaModel: unset ⇒ the CMA driver's runOnce refuses (no silent default model).
+		cmaModel: string;
 	};
 	concurrency: {
 		maxParallelSlots: number;
@@ -101,6 +105,46 @@ export interface NightshiftConfig {
 		 * Must differ from defaultReviewer for the tournament to add value.
 		 */
 		challengerProvider: string;
+		/**
+		 * V3 three-model tiebreaker: provider consulted ONLY when the two tournament
+		 * reviewers disagree on verdict. Empty ⇒ no tiebreaker (fall to stricter verdict).
+		 */
+		tiebreakerProvider: string;
+	};
+	/** V3 container isolation per run — opt-in level above worktree-only (network+fs limits). */
+	container: {
+		enabled: boolean;
+		/** Container runtime binary: "docker" | "podman". */
+		runtime: string;
+		image: string;
+		/** "none" | "bridge" — default "none" (fail-closed network isolation). */
+		network: string;
+		memLimit: string;
+		cpuLimit: string;
+	};
+	/** V3 multi-VM workers — worker daemons register with the single control plane. */
+	workers: {
+		enabled: boolean;
+		heartbeatSeconds: number;
+		/** Lease age (seconds) past which a silent worker is considered dead and reclaimed. */
+		leaseSeconds: number;
+	};
+	/** V3 CLI auto-update — factory keeps agent CLIs current (default OFF). */
+	cliUpdate: {
+		enabled: boolean;
+		checkIntervalHours: number;
+	};
+	/** V3 preview environments — every PR gets run-<id>.<domain>, reaped when idle. */
+	preview: {
+		enabled: boolean;
+		/** Empty ⇒ disabled (fail-closed; no URL can be allocated). */
+		domain: string;
+		idleReapMinutes: number;
+	};
+	/** V3 prompt self-optimization (§3.11 variant) — bounded hill-climb over a prompt. */
+	selfOptimize: {
+		enabled: boolean;
+		maxRounds: number;
 	};
 }
 
@@ -138,6 +182,8 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
 		openrouterModel: "",
 		localBaseUrl: "http://127.0.0.1:11434/v1",
 		localModel: "",
+		cmaEnabled: false,
+		cmaModel: "",
 	},
 	concurrency: {
 		maxParallelSlots: 1,
@@ -184,6 +230,33 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
 	tournament: {
 		enabled: false,
 		challengerProvider: "claude-code",
+		tiebreakerProvider: "",
+	},
+	container: {
+		enabled: false,
+		runtime: "docker",
+		image: "nightshift/agent:latest",
+		network: "none",
+		memLimit: "2g",
+		cpuLimit: "2",
+	},
+	workers: {
+		enabled: false,
+		heartbeatSeconds: 30,
+		leaseSeconds: 90,
+	},
+	cliUpdate: {
+		enabled: false,
+		checkIntervalHours: 24,
+	},
+	preview: {
+		enabled: false,
+		domain: "",
+		idleReapMinutes: 30,
+	},
+	selfOptimize: {
+		enabled: false,
+		maxRounds: 5,
 	},
 };
 

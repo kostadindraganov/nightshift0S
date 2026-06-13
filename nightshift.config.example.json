@@ -14,7 +14,10 @@
     "defaultCoder": "claude-code",
     "defaultReviewer": "codex",
     "claudeCodeEnabled": true,
-    "codexEnabled": true
+    "codexEnabled": true,
+    "cmaEnabled": false,
+    "cmaModel": "",
+    "_cma": "V3 Anthropic Managed Agents (CMA) provider plugin — default OFF. Set cmaEnabled + cmaModel; secrets via env CMA_API_KEY (optional CMA_BASE_URL, default https://api.anthropic.com/v1). Goes through the conformance harness like every driver."
   },
 
   "concurrency": {
@@ -57,6 +60,44 @@
   "tournament": {
     "enabled": false,
     "challengerProvider": "claude-code",
-    "_comment": "When enabled, each review round runs defaultReviewer + challengerProvider in parallel and synthesizes the union of findings (stricter verdict wins). Enable to increase review coverage at the cost of 2× reviewer tokens."
+    "tiebreakerProvider": "",
+    "_comment": "When enabled, each review round runs defaultReviewer + challengerProvider in parallel and synthesizes the union of findings (stricter verdict wins). Enable to increase review coverage at the cost of 2× reviewer tokens.",
+    "_tiebreaker": "V3 three-model tiebreaker: when the two reviewers disagree on the verdict, this third provider casts the deciding vote. Empty ⇒ fail-closed to the stricter verdict (revise wins)."
+  },
+
+  "container": {
+    "enabled": false,
+    "runtime": "docker",
+    "image": "nightshift/agent:latest",
+    "network": "none",
+    "memLimit": "2g",
+    "cpuLimit": "2",
+    "_comment": "V3 container isolation per run — opt-in level ABOVE worktree-only (network+fs limits). Requires docker/podman on the Linux host; fail-closed off-Linux."
+  },
+
+  "workers": {
+    "enabled": false,
+    "heartbeatSeconds": 30,
+    "leaseSeconds": 90,
+    "_comment": "V3 multi-VM workers — worker daemons register with the single control plane and heartbeat; a worker silent past leaseSeconds is reclaimed."
+  },
+
+  "cliUpdate": {
+    "enabled": false,
+    "checkIntervalHours": 24,
+    "_comment": "V3 CLI auto-update — factory keeps agent CLIs (claude/codex/gemini) current and surfaces version status. Live update exec runs on the Linux host."
+  },
+
+  "preview": {
+    "enabled": false,
+    "domain": "",
+    "idleReapMinutes": 30,
+    "_comment": "V3 preview environments — every run gets run-<id>.<domain>, auto-reaped when idle. Empty domain ⇒ disabled (fail-closed). Live deploy/reverse-proxy/DNS runs on the Linux host."
+  },
+
+  "selfOptimize": {
+    "enabled": false,
+    "maxRounds": 5,
+    "_comment": "V3 prompt self-optimization — bounded hill-climb over a prompt (propose→evaluate→keep-iff-better). Live propose/evaluate spawn runs on the Linux host."
   }
 }

@@ -17,6 +17,9 @@ import type {
   AnalyticsResponse,
   AgentMemory,
   ExperimentResponse,
+  WorkerRow,
+  PreviewRow,
+  CliStatusRow,
 } from "./types.ts";
 
 // ── Token helpers ────────────────────────────────────────────
@@ -401,4 +404,17 @@ export function getRunExperiment(
 ): Promise<ExperimentResponse> {
   const qs = direction !== undefined ? `?direction=${direction}` : "";
   return apiFetch<ExperimentResponse>(`/runs/${runId}/experiment${qs}`);
+}
+
+// ── Infra dashboard: workers / previews / CLI status (Phase 7 V3) ──
+export function getWorkers(): Promise<WorkerRow[]> {
+  return apiFetch<WorkerRow[]>(`/workers`);
+}
+
+export function getPreviews(): Promise<PreviewRow[]> {
+  return apiFetch<PreviewRow[]>(`/previews`);
+}
+
+export function getCliStatus(): Promise<CliStatusRow[]> {
+  return apiFetch<CliStatusRow[]>(`/providers/cli-status`);
 }
