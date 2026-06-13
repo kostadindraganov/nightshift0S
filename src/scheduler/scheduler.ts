@@ -18,13 +18,13 @@
  * fakes even before capacity.ts exists — no live agent spawn, no network.
  */
 
-import { and, eq, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { DbHandle } from "../db/client.ts";
 import type { EventLog } from "../events/events.ts";
 import type { TaskRow, RunRow } from "../db/schema.ts";
 import type { AuthLane, RunState } from "../db/columns.ts";
 import { RUN_TERMINAL_STATES } from "../db/columns.ts";
-import { runs, events } from "../db/schema.ts";
+import { runs, events, tasks } from "../db/schema.ts";
 import { listTasks } from "../tasks/tasks.ts";
 import { listRuns } from "../runs/runs.ts";
 
@@ -54,6 +54,7 @@ export interface SchedulerDeps {
 	handle: DbHandle;
 	log: EventLog;
 	maxParallelSlots: number; // config concurrency.maxParallelSlots
+	maxReviewWip: number; // config concurrency.maxReviewWip — review-WIP throttle ceiling
 	capacity: CapacityPort;
 	/**
 	 * Routing policy lives HERE (injected): provider/model/prompt per task.
@@ -109,6 +110,24 @@ export function countActiveCoderRuns(handle: DbHandle): number {
 }
 
 // ---------------------------------------------------------------------------
+// countReviewWip
+// ---------------------------------------------------------------------------
+
+/**
+ * Sync helper: tasks awaiting/cleared review — state IN ("review", "approved").
+ * These are tasks whose coder opened a PR that is not yet merged; they gate the
+ * review-WIP throttle so coder output can't outrun review capacity.
+ */
+export function countReviewWip(handle: DbHandle): number {
+	const inReview = handle.db
+		.select({ id: tasks.id })
+		.from(tasks)
+		.where(inArray(tasks.state, ["review", "approved"]))
+		.all();
+	return inReview.length;
+}
+
+// ---------------------------------------------------------------------------
 // tickOnce — one slot-filling fill pass (§5.2)
 // ---------------------------------------------------------------------------
 
@@ -125,6 +144,15 @@ export async function tickOnce(deps: SchedulerDeps): Promise<TickReport> {
 
 	let free = deps.maxParallelSlots - activeAtStart;
 	if (free <= 0) {
+		return { activeAtStart, started, skipped };
+	}
+
+	// Review-WIP throttle (§3.7.1): a coder claim eventually produces a PR that
+	// must be reviewed. Once `maxReviewWip` tasks are already awaiting/cleared
+	// review (state "review" or "approved" — PR opened, not yet merged), STOP
+	// claiming new work this pass so agent output can't outrun review capacity.
+	const reviewWip = countReviewWip(handle);
+	if (reviewWip >= deps.maxReviewWip) {
 		return { activeAtStart, started, skipped };
 	}
 

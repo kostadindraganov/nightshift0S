@@ -50,6 +50,7 @@ export interface NightshiftConfig {
 	};
 	concurrency: {
 		maxParallelSlots: number;
+		maxReviewWip: number;
 		perProviderCap: number;
 		schedulerIntervalSeconds: number;
 		schedulerDebounceMs: number;
@@ -203,6 +204,7 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
 	},
 	concurrency: {
 		maxParallelSlots: 1,
+		maxReviewWip: 5,
 		perProviderCap: 1,
 		schedulerIntervalSeconds: 30,
 		schedulerDebounceMs: 250,

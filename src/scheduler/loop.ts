@@ -153,6 +153,7 @@ export async function startSchedulerLoop(
 		handle,
 		log,
 		maxParallelSlots: config.concurrency.maxParallelSlots,
+		maxReviewWip: config.concurrency.maxReviewWip,
 		capacity: { canSpawn: (provider, lane) => canSpawn(capacityDeps, provider, lane) },
 		resolveSpawn: input.resolveSpawn,
 		// The egress fail-closed gate lives inside startCoderTask — the chokepoint.

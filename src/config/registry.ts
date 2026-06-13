@@ -111,6 +111,18 @@ export const REGISTRY: Record<string, RegistryEntry> = {
 			return { ok: true };
 		},
 	},
+	"concurrency.maxReviewWip": {
+		key: "concurrency.maxReviewWip",
+		configPath: "concurrency.maxReviewWip",
+		type: "number",
+		scopes: ["global"],
+		secret: false,
+		defaultValue: DEFAULT_CONFIG.concurrency.maxReviewWip,
+		validate(v) {
+			if (!isPositiveInt(v)) return { ok: false, reason: "must be a positive integer" };
+			return { ok: true };
+		},
+	},
 	"concurrency.perProviderCap": {
 		key: "concurrency.perProviderCap",
 		configPath: "concurrency.perProviderCap",

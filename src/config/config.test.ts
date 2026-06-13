@@ -121,7 +121,7 @@ test("NIGHTSHIFT_LOG_LEVEL env var sets logging.level", () => {
 // ---------------------------------------------------------------------------
 // (d) describeConfig enumerates every leaf knob
 
-test("describeConfig returns one entry per leaf knob — 59 total", () => {
+test("describeConfig returns one entry per leaf knob — 60 total", () => {
 	const config = loadConfig({ path: "/nonexistent", env: {} });
 	const entries = describeConfig(config);
 	// Manually verified: 59 leaves across all sections.
@@ -133,7 +133,8 @@ test("describeConfig returns one entry per leaf knob — 59 total", () => {
 		//   container.{enabled,runtime,image,network,memLimit,cpuLimit},
 		//   workers.{enabled,heartbeatSeconds,leaseSeconds}, cliUpdate.{enabled,checkIntervalHours},
 		//   preview.{enabled,domain,idleReapMinutes}, selfOptimize.{enabled,maxRounds}.
-	expect(entries).toHaveLength(59);
+		// +1 concurrency.maxReviewWip (review-WIP throttle).
+	expect(entries).toHaveLength(60);
 	for (const entry of entries) {
 		expect(typeof entry.section).toBe("string");
 		expect(entry.section.length).toBeGreaterThan(0);
