@@ -463,10 +463,14 @@ ready task is skipped, never a pretend spawn). GATE-5 worklist status:
     third reviewer one-shot, fail-closed-to-stricter). WIRING PENDING: `resolveWithTiebreak` works on two
     parsed `Verdict`s, but the live tournament path synthesizes at the stdout level — connecting needs a
     Verdict-level review-round restructure (architectural).
-  - ◑ **Experiment live deps (6.A4/6.D3)**: `dispatchExperiment` exists but has no invocation caller, so the
-    live deps (`makeLiveExperimentDeps`) were deferred to avoid dead code. NEXT: add an HTTP route (POST
-    /routines/:id/experiment) that calls `dispatchExperiment(..., {experimentDeps: makeLiveExperimentDeps(...)})`,
-    + the live git/eval/agent deps (eval on a read-only worktree OUTSIDE target_paths §3.12.8).
+  - ☑ **Experiment live deps + invocation route (6.A4/6.D3 LIVE)**: `src/orchestrator/experimentLiveDeps.ts`
+    `makeLiveExperimentDeps` — REAL produceEdit (one-shot agent turn editing only target_paths), commit
+    (git add+commit, ok:false when nothing changed), evalRunner (§3.12.8: eval runs on a SEPARATE detached
+    `git worktree add --detach` checkout of the commit, NOT the agent's editing dir, always removed in
+    finally), parseMetric (JSON+regex), reset (git reset --hard + clean). All sub-seams injectable. 7 tests
+    (Haiku) incl. an explicit §3.12.8-isolation assertion. Wired via `POST /routines/:id/experiment` in
+    routes.ts (synchronous routine/repo guards → fire-and-forget `dispatchExperiment` with the live deps,
+    202 Accepted). Chain now complete: route → dispatchExperiment → runExperimentForRun → live deps.
   - ☐ **Remaining runtime surfaces:** bwrap (2.3, works) + nftables egress (2.4 — needs a SEPARATE agent uid:
     control plane + agents share uid 1000, so a uid-scoped DROP would filter the control plane); container
     runtime (docker/podman absent); remote worker daemons (7.2 — needs other machines); live preview

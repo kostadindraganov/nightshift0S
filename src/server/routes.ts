@@ -47,6 +47,9 @@ import {
 import { TmuxLauncher } from "../runs/launcher.ts";
 import type { Planner } from "../planner/bootstrap.ts";
 import { loadConfig } from "../config/config.ts";
+import { getRoutine } from "../triggers/routines.ts";
+import { dispatchExperiment } from "../orchestrator/experimentDispatcher.ts";
+import { makeLiveExperimentDeps } from "../orchestrator/experimentLiveDeps.ts";
 import {
 	addDependency,
 	recomputeReadiness,
@@ -494,6 +497,59 @@ export const routes: Route[] = [
 					await recomputeReadiness(ctx.handle, ctx.events, result.task.projectId);
 				}
 				return json({ task: result.task, from: result.from });
+		},
+	},
+	// -- experiments (§3.11 / 6.A4·6.D3) — dispatch a live hill-climb loop --------
+	{
+		method: "POST",
+		path: "/routines/:id/experiment",
+		auth: true,
+		summary: "Dispatch a live experiment loop for an experiment routine: {task_id, max_iterations?, until?}",
+		handler: async (ctx) => {
+			const routineId = parseIntParam(ctx.params.id, "routine id");
+			const body = await readBody(ctx.req);
+			if (typeof body.task_id !== "number") {
+				throw new ValidationError("task_id must be an integer");
+			}
+			// Synchronous guards (the async loop validates again, but answer the
+			// caller honestly before the fire-and-forget dispatch).
+			const routine = getRoutine(ctx.handle, routineId);
+			if (!routine) return jsonError(404, "not_found", `routine ${routineId} not found`);
+			if (routine.kind !== "experiment") {
+				throw new ValidationError(`routine ${routineId} is not an experiment (kind=${routine.kind})`);
+			}
+			const repoDir = process.env.NIGHTSHIFT_REPO_DIR;
+			if (!repoDir) {
+				throw new ValidationError(
+					"NIGHTSHIFT_REPO_DIR is not set — live experiments require a local repo dir",
+				);
+			}
+			const cfg = loadConfig();
+			const experimentDeps = makeLiveExperimentDeps({
+				handle: ctx.handle,
+				log: ctx.events,
+				repoDir,
+				homeRoot: cfg.sandbox.homeRoot,
+				provider: cfg.providers.defaultCoder,
+			});
+			const input = {
+				routineId,
+				taskId: body.task_id,
+				...(typeof body.max_iterations === "number" ? { maxIterations: body.max_iterations } : {}),
+				...(typeof body.until === "string" ? { until: body.until } : {}),
+			};
+			// Fire-and-forget: the hill-climb loop can run many iterations; the run
+			// row + experiment_ledger track progress. Return 202 immediately.
+			void dispatchExperiment(
+				{ handle: ctx.handle, log: ctx.events, experimentDeps },
+				input,
+			).catch((err) =>
+				console.error(
+					"[experiment route] dispatch failed:",
+					err instanceof Error ? err.message : String(err),
+				),
+			);
+			return json({ accepted: true, routineId, taskId: body.task_id }, 202);
 		},
 	},
 	// -- draft lane (§3.10 item 2) ------------------------------------------------
