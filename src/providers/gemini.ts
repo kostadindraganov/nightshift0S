@@ -1,22 +1,23 @@
 /**
- * gemini ProviderDriver (BLUEPRINT §3.12.13).
+ * Anti Gravity CLI ProviderDriver (BLUEPRINT §3.12.13).
  *
- * WHY: Wraps the Gemini CLI (`gemini`) as a candidate provider. Like every
- * non-claude-code driver its declared capabilities are a HYPOTHESIS only — the
- * conformance harness must PROVE each axis at runtime before the router will
- * use it. We encode an HONEST `declared` set grounded in the actual CLI surface:
+ * WHY: Wraps the Anti Gravity CLI (`agy`, formerly `gemini`) as a candidate
+ * provider. Like every non-claude-code driver its declared capabilities are a
+ * HYPOTHESIS only — the conformance harness must PROVE each axis at runtime
+ * before the router will use it. We encode an HONEST `declared` set grounded
+ * in the actual CLI surface:
  *
- *   - Headless one-shot: `gemini -p "<prompt>" --output-format json` emits a
+ *   - Headless one-shot: `agy -p "<prompt>" --output-format json` emits a
  *     single JSON object { response, stats, error? }. `response` is the model
  *     text; `stats` carries token counts (input/output/total) but NO USD cost.
- *   - Resume: `gemini -r "<session-id>" "<prompt>"` resumes a session. BUT the
+ *   - Resume: `agy -r "<session-id>" "<prompt>"` resumes a session. BUT the
  *     headless JSON output does NOT surface a session_id (it only appears in the
  *     hook stdin envelope), so runOnce cannot return a sessionId today. We still
  *     declare resume:true honestly (the flag exists) — the conformance resume
  *     probe will then FAIL-CLOSED because runOnce yields no sessionId, and the
  *     router will refuse to use resume. That is the correct, honest outcome.
- *   - cost_reporting: FALSE. Gemini reports tokens but not USD; the cost probe
- *     requires costUsd > 0, so we do not claim it.
+ *   - cost_reporting: FALSE. Anti Gravity CLI reports tokens but not USD; the
+ *     cost probe requires costUsd > 0, so we do not claim it.
  *   - structured_output: via XML-tag extraction over `response` (same trust
  *     boundary as claude-code/codex; UNTRUSTED until the probe proves it).
  *
@@ -45,7 +46,7 @@ export interface GeminiDeps {
 	which: WhichFn;
 }
 
-/** Shape of `gemini --output-format json` (only the fields we read). */
+/** Shape of `agy --output-format json` (only the fields we read). */
 interface GeminiJsonOutput {
 	response?: string;
 	stats?: {
@@ -56,7 +57,7 @@ interface GeminiJsonOutput {
 	error?: { message?: string };
 }
 
-const GEMINI_BIN = "gemini";
+const GEMINI_BIN = "agy"; // Anti Gravity CLI (formerly `gemini`)
 /** 5-minute wall-clock budget for a single probe turn (matches claude-code). */
 const TURN_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -97,7 +98,7 @@ export function makeGeminiDriver(deps: GeminiDeps): ProviderDriver {
 			resume: true, // `-r <id>` flag exists; resume probe fail-closes (no sessionId in headless JSON).
 			fork: false,
 			structured_output: true, // XML-tag extraction over `response` (UNTRUSTED until proven).
-			cost_reporting: false, // Gemini reports tokens but NOT USD; do not claim it.
+			cost_reporting: false, // Anti Gravity CLI reports tokens but NOT USD; do not claim it.
 			auth: ["api_key"],
 			roles: ["coder", "reviewer", "planner", "utility", "experiment"],
 		},
@@ -118,7 +119,7 @@ export function makeGeminiDriver(deps: GeminiDeps): ProviderDriver {
 		},
 
 		async resumeOnce({ sessionId, prompt }) {
-			// `gemini -r "<session-id>" "<prompt>"` — positional prompt, no -p.
+			// `agy -r "<session-id>" "<prompt>"` — positional prompt, no -p.
 			const { stdout } = await deps.exec(
 				GEMINI_BIN,
 				["-r", sessionId, prompt, "--output-format", "json"],
@@ -153,5 +154,5 @@ const realExec: ExecFn = async (bin, args, opts) => {
 	return { stdout };
 };
 
-/** The production gemini driver (real side effects). */
+/** The production Anti Gravity CLI driver (real side effects). */
 export const gemini: ProviderDriver = makeGeminiDriver({ exec: realExec, which: realWhich });

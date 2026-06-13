@@ -177,7 +177,7 @@ export function makeCliUpdater(deps: { exec: ExecFn; which: WhichFn }): {
 export const DEFAULT_CLI_TARGETS: CliTarget[] = [
 	{ provider: "claude", bin: "claude", versionArgs: ["--version"] },
 	{ provider: "codex", bin: "codex", versionArgs: ["--version"] },
-	{ provider: "gemini", bin: "gemini", versionArgs: ["--version"] },
+	{ provider: "gemini", bin: "agy", versionArgs: ["--version"] }, // Anti Gravity CLI (formerly `gemini`)
 ];
 
 // ---------------------------------------------------------------------------

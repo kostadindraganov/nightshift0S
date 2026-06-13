@@ -26,7 +26,7 @@ WorkingDirectory=/opt/nightshift
 # ── runtime environment ──────────────────────────────────────────────────────
 # Bun needs its own install dir on PATH; the service user's ~/.bun/bin is the
 # standard location from the Bun install script.
-Environment=PATH=/home/nightshift/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/home/nightshift/.bun/bin:/home/nightshift/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HOME=/home/nightshift
 # Bun loads .env automatically, but explicit vars here win over .env for
 # the knobs we always want set at the system level.

@@ -1,5 +1,5 @@
 /**
- * C3 CLI driver tests — gemini / opencode / antigravity (task C3).
+ * C3 CLI driver tests — gemini (agy) / opencode / antigravity (task C3).
  *
  * WHY: the real binaries are ABSENT in this environment, so every case injects
  * a FAKE exec/which (no spawn, no PATH, no network). We assert the load-bearing
@@ -42,14 +42,14 @@ test("gemini runOnce: correct argv + parses response/tokens from JSON", async ()
 	const out = await driver.runOnce({ prompt: "say hi", cwd: "/repo" });
 
 	expect(calls[0]).toEqual({
-		bin: "gemini",
+		bin: "agy",
 		args: ["-p", "say hi", "--output-format", "json"],
 		cwd: "/repo",
 	});
 	expect(out.stdout).toBe("hi there");
 	expect(out.tokensIn).toBe(11);
 	expect(out.tokensOut).toBe(7);
-	// Gemini reports no USD — cost_reporting must stay honest.
+	// Anti Gravity CLI reports no USD — cost_reporting must stay honest.
 	expect(out.costUsd).toBeUndefined();
 });
 
@@ -101,20 +101,24 @@ test("gemini resumeOnce: argv is -r <sessionId> <prompt> --output-format json", 
 });
 
 // ---------------------------------------------------------------------------
-// (4) antigravity: FAIL-CLOSED — no headless surface, every probe failed/skipped,
-//     proven all-false even though the launcher is "available".
+// (4) antigravity: headless agy driver — correct argv + JSON parse.
 // ---------------------------------------------------------------------------
 
-test("antigravity: available but proven all-false (no headless capability)", async () => {
-	const driver = makeAntigravityDriver({ which: whichTrue });
+test("antigravity runOnce: correct agy argv + parses response from JSON", async () => {
+	const { exec, calls } = recordingExec(() =>
+		JSON.stringify({ response: "hello from agy", stats: { input_tokens: 5, output_tokens: 3 } }),
+	);
+	const driver = makeAntigravityDriver({ exec, which: whichTrue });
 
 	expect(await driver.isAvailable()).toBe(true);
-	expect(driver.declared.roles).toEqual([]);
-	await expect(driver.runOnce({ prompt: "x" })).rejects.toThrow(/no headless/i);
+	expect(driver.declared.roles).not.toEqual([]);
 
-	const report = await runConformance(driver, PROBES);
-	expect(report.proven.structured_output).toBe(false);
-	expect(report.proven.resume).toBe(false);
-	expect(report.proven.cost_reporting).toBe(false);
-	expect(report.proven.roles).toEqual([]);
+	const out = await driver.runOnce({ prompt: "say hello", cwd: "/repo" });
+
+	expect(calls[0]).toEqual({
+		bin: "agy",
+		args: ["-p", "say hello", "--output-format", "json"],
+		cwd: "/repo",
+	});
+	expect(out.stdout).toBe("hello from agy");
 });
