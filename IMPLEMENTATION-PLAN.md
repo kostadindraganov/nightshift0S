@@ -433,11 +433,23 @@ ready task is skipped, never a pretend spawn). GATE-5 worklist status:
     parallel finders via `runReviewHarness` → `toVerdictShape`, then persist/apply mirroring
     `runReviewRound`). Selected per new `config.review.specialistHarness` flag (default false; editable
     registry knob added); `reviewTrigger` branches single-judge vs harness. 6 tests (Haiku), all green.
-  - ☐ **Wire remaining host closures:** experiment-run dispatch (6.A4/6.D3 — scheduler has no
-    experiment-kind branch yet; needs a run-creation seam — deferred, needs an architectural decision).
-  - ☐ **Run the "fix typo" task end-to-end** per `docs/LINUX-DEPLOY.md`: real spawn → push → PR →
-    review ping-pong → human merge → dependents unblock (closes GATE 2/3/4 live). The triggers are
-    now wired and inert until a live coder run actually succeeds (needs bwrap/egress active).
+  - ☑ **Experiment-run dispatch seam (6.A4/6.D3)**: `src/orchestrator/experimentDispatcher.ts`
+    `dispatchExperiment({routineId, taskId})` — the missing caller for `runExperimentForRun` (which
+    had none): looks up the experiment routine, creates an `experiment`-kind run, walks the run
+    lifecycle (queued→starting→running→finishing→succeeded|failed), and drives the hill-climb loop.
+    FAIL-CLOSED: live side-effects injected via `experimentDeps` (default `makeFailClosedExperimentDeps`
+    refuses agent/git/eval → run finalizes failed, never pretends). 5 tests (Haiku), all green.
+    REMAINING (runtime/GATE-5): the LIVE experiment deps (produceEdit via agent spawn, commit/reset via
+    git, evalRunner on a read-only checkout OUTSIDE target_paths §3.12.8) + an invocation surface
+    (HTTP route / cron) — same runtime category as the live coder spawn.
+  - ◑ **"fix typo" end-to-end** per `docs/LINUX-DEPLOY.md` (real spawn → push → PR → review ping-pong →
+    human merge → dependents unblock). HOST DIAGNOSED READY 2026-06-14: `claude` 2.1.177 authenticated
+    (`.credentials.json`), `codex` 0.139.0, `agy` 1.0.8, `bwrap` 0.11.0 works (namespace smoke ok),
+    `GITHUB_TOKEN` set, `git`/`tmux` present. The coder-completion + review triggers are wired and inert
+    until a live coder run succeeds. GAPS before a full run: (a) nftables egress not yet applied (the
+    sandboxed agent needs network to Anthropic); (b) no demo project/task in the DB; (c) `NIGHTSHIFT_REPO_DIR`
+    points at the live repo — a real run needs a dedicated target repo. The final push→PR→human-merge is
+    outward-facing and needs an explicit target repo + go.
   - ☐ **Activate the runtime surfaces:** bwrap (2.3) + nftables egress (2.4) + container run (7.1);
     remote worker daemons (7.2); live CLI update exec (7.3); live preview deploy/reverse-proxy/DNS (7.4);
     live CMA API + conformance (7.5); prompt-optimize propose/evaluate (7.6); third-reviewer
