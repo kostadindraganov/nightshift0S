@@ -1,25 +1,31 @@
 # Nightshift — Implementation Plan
 
-Status: 2026-06-13 (origin/main @ a7d4b76 + uncommitted Phase-5-finish wave). Blueprint
-APPROVED. Step 0 done.
-**Resume point: live runtime-verify on the Linux deploy host (GATE 5). ALL Phase 5
-tasks are now built & logic-tested on macOS.**
-Phases 0–4 DONE on macOS (GATE 1 ✓; GATE 2/3/4 ◑ = built & logic-tested with
-scripted agents/injected fakes + real git/DB). Phase 5: **5.1–5.9 done** (5.2 / 5.6 /
-5.8 closed this wave) + 5.10 code-complete. The whole
-live/Linux wiring is CODE-COMPLETE: real reviewer/coder/planner spawn
-(`src/runs/liveSpawn.ts`, coder `--resume`), host-side GitHub forge+CI clients
-(`src/forge/githubForgeClient.ts`, `src/gate/githubCiClient.ts`,
-`src/orchestrator/prodDeps.ts`), auto-merge preflight (`src/forge/preflight.ts`),
-egress apply (`src/egress/apply.ts` + `ops/egress-*.sh`), xterm.js terminal
-(`src/server/terminalRoutes.ts` + `web/components/terminal/`), and deploy
-(`ops/deploy.sh` + `ops/nightshift.service`). **782 tests pass; typecheck clean.**
-NOTE: run the suite with `bun run test` (the curated dir list) — bare `bun test`
-discovers vendored/e2e files that HANG. What REMAINS is RUNTIME/NETWORK verification
-on Linux + live GitHub — run the "fix typo" task end-to-end per **`docs/LINUX-DEPLOY.md`**
-(real spawn → push → PR → review → human merge → dependents unblock) plus
-nftables/bwrap activation, plus boot-wiring the cron/notifier timers in main.ts.
-Specs that bind every task below:
+Status: 2026-06-14 — **DEPLOYED & LIVE-WIRED on the Debian/Proxmox host**, single git
+branch `main` (master + ecc-tools consolidated/deleted). Blueprint APPROVED.
+**1234 tests pass / 4 pre-existing bwrap-on-Linux fails; typecheck clean.** Run the
+suite ONLY as `bun run test` (curated dirs) — bare `bun test` discovers vendored/e2e
+files that HANG.
+
+WHAT IS NOW LIVE (this 2026-06-14 wave, on top of the prior code-complete base):
+- **Deploy (5.10 ☑):** systemd service live on the host; `/healthz`+`/readyz` ok; scheduler
+  loop + all triggers/cadences boot cleanly (see GATE-5 worklist below).
+- **The autonomous loop is wired end-to-end** in `main.ts onReady`: coder-completion trigger
+  (run→succeeded ⇒ `completeCoderRun`), review-round trigger (task→review ⇒ `runReviewRound`,
+  tournament-aware), evidence-routing wrap around `resolveSpawn` (6.D2), AGENTS.md cadence
+  (6.B4/6.D4), CLI auto-update cadence (7.3), plus the V2 loops + auto-merge hook.
+- **§3.4 specialist-harness review path (5.6)** selectable via `config.review.specialistHarness`.
+- **Experiments (6.A4/6.D3)** end-to-end: `dispatchExperiment` + `makeLiveExperimentDeps`
+  (§3.12.8 eval isolation) + `POST /routines/:id/experiment`.
+- **Anti Gravity CLI (`agy`)** replaces the old `gemini` binary throughout.
+- **Built+tested modules awaiting only runtime/architecture to wire:** tiebreaker live spawn
+  (7.7), container-spawn selector (7.1).
+
+WHAT REMAINS = runtime/infra/architecture only (NOT connectable code) — see the GATE-5
+worklist at the end of Phase 8: nftables egress needs a SEPARATE agent uid (control plane
++ agents share uid 1000); container needs docker; tiebreaker needs a Verdict-level review
+restructure; remote workers/preview/CMA/playwright/prompt-optimize need infra/keys/a
+dispatcher; the "fix typo" e2e needs a dedicated target repo + an explicit go (outward-facing
+push). Specs that bind every task below:
 `docs/BLUEPRINT.md` (§3.12 overrides), `docs/SPEC-STATE-MACHINES.md`,
 `docs/SPEC-SCHEMA.md`, `docs/THREAT-MODEL.md`, `REUSE.md`.
 
