@@ -31,7 +31,32 @@ export SERVICE_USER="nightshift"              # Unprivileged service user
 export INSTALL_DIR="/opt/nightshift"          # Repo path
 export SERVICE_HOME="/home/nightshift"        # User home
 export NIGHTSHIFT_PORT="3000"                 # HTTP server port
+
+# Optional — V2 (Phase 6) notifier channels. ALL fail-closed: unset ⇒ that
+# channel is simply not built (startV2Loops stays inert, cron still runs but
+# notifies nothing). Set to activate live notifications + the standup digest.
+export TELEGRAM_BOT_TOKEN="123456:ABC..."     # enables the Telegram channel (with CHAT_ID)
+export TELEGRAM_CHAT_ID="-1001234567890"      # destination chat for Telegram notifications
+export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."  # enables the Slack channel
 ```
+
+### 1.1a V2 (Phase 6) live loops — what auto-starts
+
+On `bun run dev` / the systemd service (NOT under tests — `createServer`'s
+`onReady` seam is the guard), `startV2Loops` (`src/server/v2Boot.ts`) starts:
+the **cron trigger scheduler** (fires due `cron` triggers; harmless if none are
+enabled), and — only when the env above is present — the **notifier → Telegram/
+Slack channels**, the **event bridge** (done/failed/needs_human → notify), and
+the **standup digest** poller. Webhook (`POST /webhooks/:id`) and chat
+(`POST /chat/telegram/:id`) ingress are already live via the route table.
+
+Three seams still need a host-specific closure (operator-owned, same pattern as
+the scheduler's `resolveSpawn`) and are wired in `main.ts` on this VM:
+evidence-based routing (`makeEvidenceResolveSpawn`), experiment runs
+(`runExperimentForRun` with live git/eval/agent deps), and AGENTS.md upkeep
+(`scanRepoSnapshot` → `proposeAgentsMd`). Opt-in Playwright verification
+(`src/verify/`) needs a real `playwright install` (`bunx playwright install
+chromium`) — its adapter lazy-imports and fail-closes until then.
 
 ### 1.2 Create `/etc/nightshift/env` (or let deploy.sh do it)
 
@@ -46,6 +71,10 @@ cat | sudo tee /etc/nightshift/env > /dev/null <<'EOF'
 NIGHTSHIFT_API_TOKEN=sk-...
 GITHUB_TOKEN=ghp_...
 ANTHROPIC_API_KEY=sk-ant-...
+# Optional V2 notifier channels (omit to leave them inert / fail-closed):
+# TELEGRAM_BOT_TOKEN=123456:ABC...
+# TELEGRAM_CHAT_ID=-1001234567890
+# SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 EOF
 
 sudo chmod 640 /etc/nightshift/env
