@@ -56,6 +56,16 @@ function seedReadyTask(priority: number): number {
 		.get().id;
 }
 
+/** Seed a task in a given state (e.g. "review"/"approved") — counts as review-WIP. */
+function seedTaskInState(state: "review" | "approved", priority: number): number {
+	const now = new Date().toISOString();
+	return handle.db
+		.insert(tasks)
+		.values({ projectId, title: `w${priority}`, state, priority, createdAt: now, updatedAt: now })
+		.returning()
+		.get().id;
+}
+
 /** Seed a coder run directly in a given (possibly active) state — occupies a slot. */
 function seedCoderRun(state: RunState): void {
 	handle.db
@@ -79,6 +89,7 @@ function makeDeps(over: Partial<SchedulerDeps> & { startedTaskIds?: number[] } =
 		handle,
 		log,
 		maxParallelSlots: 3,
+		maxReviewWip: 999, // effectively unbounded so existing tests are unaffected
 		capacity: okCapacity,
 		resolveSpawn: async () => plan(),
 		startRun: async (input) => {
@@ -236,4 +247,35 @@ test("concurrent kicks coalesce: each ready task is claimed exactly once", async
 	expect(new Set(startedTaskIds).size).toBe(startedTaskIds.length);
 	expect(startedTaskIds.length).toBe(2);
 	expect(maxConcurrentStartRun).toBe(1);
+});
+
+// ---------------------------------------------------------------------------
+// (f) review-WIP throttle: at/above the ceiling, claim NOTHING this pass
+// ---------------------------------------------------------------------------
+
+test("review-WIP at the ceiling throttles the pass — nothing is claimed", async () => {
+	// Free slots and ready work exist, so a normal pass WOULD spawn...
+	const t1 = seedReadyTask(1);
+	const t2 = seedReadyTask(2);
+	// ...but maxReviewWip tasks already sit in review/approved (PRs not yet merged).
+	seedTaskInState("review", 10);
+	seedTaskInState("review", 11);
+	seedTaskInState("approved", 12); // 3 in review-WIP
+
+	const startedTaskIds: number[] = [];
+	const deps = makeDeps({ maxParallelSlots: 3, maxReviewWip: 3, startedTaskIds });
+
+	const report = await tickOnce(deps);
+
+	// reviewWip (3) >= maxReviewWip (3) → claim nothing despite free slots + ready tasks.
+	expect(report.started).toEqual([]);
+	expect(startedTaskIds).toEqual([]);
+	void t1;
+	void t2;
+
+	// Companion: drop the ceiling to ABOVE the current WIP → it fills normally again.
+	const startedBelow: number[] = [];
+	const below = await tickOnce(makeDeps({ maxParallelSlots: 3, maxReviewWip: 4, startedTaskIds: startedBelow }));
+	expect(below.started).toEqual([t1, t2]);
+	expect(startedBelow).toEqual([t1, t2]);
 });

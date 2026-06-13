@@ -269,6 +269,8 @@ export interface StartCoderTaskInput {
 	prompt: string;
 	repoDir: string;
 	homeRoot: string;
+	/** Blueprint workflow-skill slugs mounted into the per-task HOME before launch. */
+	skillsMount?: string[];
 	/**
 	 * True for any non-human-initiated spawn (scheduler/webhook). When true the
 	 * egress fail-closed gate is enforced before any run row or agent process is
@@ -341,6 +343,7 @@ export async function startCoderTask(
 			prompt: input.prompt,
 			repoDir: input.repoDir,
 			homeRoot: input.homeRoot,
+			skillsMount: input.skillsMount,
 		});
 	} catch (err) {
 		// (1) Run → killed from ANY active state (no expectedFrom: spawnRun may

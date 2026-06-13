@@ -121,10 +121,11 @@ test("NIGHTSHIFT_LOG_LEVEL env var sets logging.level", () => {
 // ---------------------------------------------------------------------------
 // (d) describeConfig enumerates every leaf knob
 
-test("describeConfig returns one entry per leaf knob — 57 total", () => {
+test("describeConfig returns one entry per leaf knob — 60 total", () => {
 	const config = loadConfig({ path: "/nonexistent", env: {} });
 	const entries = describeConfig(config);
-	// Manually verified: 57 leaves across all sections.
+	// Manually verified: 59 leaves across all sections.
+	// +2 from blueprint integration: coder.skillsMount, coder.fileFollowUps.
 	// +9 from Phase 5C: providers.{gemini,opencode,antigravity,openrouter,local}Enabled,
 	// providers.{openrouterModel,localBaseUrl,localModel}, forge.trustedCheckAppIds.
 	// +2 from Phase 7 (forge plugins): tournament.{enabled,challengerProvider}.
@@ -132,7 +133,8 @@ test("describeConfig returns one entry per leaf knob — 57 total", () => {
 		//   container.{enabled,runtime,image,network,memLimit,cpuLimit},
 		//   workers.{enabled,heartbeatSeconds,leaseSeconds}, cliUpdate.{enabled,checkIntervalHours},
 		//   preview.{enabled,domain,idleReapMinutes}, selfOptimize.{enabled,maxRounds}.
-	expect(entries).toHaveLength(57);
+		// +1 concurrency.maxReviewWip (review-WIP throttle).
+	expect(entries).toHaveLength(60);
 	for (const entry of entries) {
 		expect(typeof entry.section).toBe("string");
 		expect(entry.section.length).toBeGreaterThan(0);

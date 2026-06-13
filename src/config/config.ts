@@ -50,6 +50,7 @@ export interface NightshiftConfig {
 	};
 	concurrency: {
 		maxParallelSlots: number;
+		maxReviewWip: number;
 		perProviderCap: number;
 		schedulerIntervalSeconds: number;
 		schedulerDebounceMs: number;
@@ -146,6 +147,22 @@ export interface NightshiftConfig {
 		enabled: boolean;
 		maxRounds: number;
 	};
+	coder: {
+		/**
+		 * Blueprint workflow-skill slugs mounted into each spawned coder's
+		 * per-task HOME (`vendor/blueprint-skills/skills/<slug>/SKILL.md`). Empty
+		 * disables the mount. Only the implementation-phase skills by default;
+		 * spec/plan/branch/commit/pr are owned by the nightshift orchestrator.
+		 */
+		skillsMount: string[];
+		/**
+		 * When true, on coder-run success the scheduler reads
+		 * `.nightshift/follow-ups.json` from the worktree and files each entry as a
+		 * draft task (the loop "feeds itself"). The agent is also told it may write
+		 * that file for out-of-scope findings. Draft-only — triage promotes them.
+		 */
+		fileFollowUps: boolean;
+	};
 }
 
 export interface ConfigEntry {
@@ -187,6 +204,7 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
 	},
 	concurrency: {
 		maxParallelSlots: 1,
+		maxReviewWip: 5,
 		perProviderCap: 1,
 		schedulerIntervalSeconds: 30,
 		schedulerDebounceMs: 250,
@@ -257,6 +275,10 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
 	selfOptimize: {
 		enabled: false,
 		maxRounds: 5,
+	},
+	coder: {
+		skillsMount: ["implement", "tdd", "debug", "refactor", "review"],
+		fileFollowUps: true,
 	},
 };
 

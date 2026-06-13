@@ -111,6 +111,18 @@ export const REGISTRY: Record<string, RegistryEntry> = {
 			return { ok: true };
 		},
 	},
+	"concurrency.maxReviewWip": {
+		key: "concurrency.maxReviewWip",
+		configPath: "concurrency.maxReviewWip",
+		type: "number",
+		scopes: ["global"],
+		secret: false,
+		defaultValue: DEFAULT_CONFIG.concurrency.maxReviewWip,
+		validate(v) {
+			if (!isPositiveInt(v)) return { ok: false, reason: "must be a positive integer" };
+			return { ok: true };
+		},
+	},
 	"concurrency.perProviderCap": {
 		key: "concurrency.perProviderCap",
 		configPath: "concurrency.perProviderCap",
@@ -232,6 +244,31 @@ export const REGISTRY: Record<string, RegistryEntry> = {
 		scopes: ["global", "project", "routine"],
 		secret: false,
 		defaultValue: DEFAULT_CONFIG.review.autoMergeEnabled,
+		validate(v) {
+			if (!isBoolean(v)) return { ok: false, reason: "must be a boolean" };
+			return { ok: true };
+		},
+	},
+	// -- coder -----------------------------------------------------------------
+	"coder.skillsMount": {
+		key: "coder.skillsMount",
+		configPath: "coder.skillsMount",
+		type: "stringArray",
+		scopes: ["global", "project", "routine"],
+		secret: false,
+		defaultValue: DEFAULT_CONFIG.coder.skillsMount,
+		validate(v) {
+			if (!isStringArray(v)) return { ok: false, reason: "must be an array of skill slugs" };
+			return { ok: true };
+		},
+	},
+	"coder.fileFollowUps": {
+		key: "coder.fileFollowUps",
+		configPath: "coder.fileFollowUps",
+		type: "boolean",
+		scopes: ["global", "project", "routine"],
+		secret: false,
+		defaultValue: DEFAULT_CONFIG.coder.fileFollowUps,
 		validate(v) {
 			if (!isBoolean(v)) return { ok: false, reason: "must be a boolean" };
 			return { ok: true };
