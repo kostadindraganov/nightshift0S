@@ -250,6 +250,18 @@ export const REGISTRY: Record<string, RegistryEntry> = {
 			return { ok: true };
 		},
 	},
+	"coder.fileFollowUps": {
+		key: "coder.fileFollowUps",
+		configPath: "coder.fileFollowUps",
+		type: "boolean",
+		scopes: ["global", "project", "routine"],
+		secret: false,
+		defaultValue: DEFAULT_CONFIG.coder.fileFollowUps,
+		validate(v) {
+			if (!isBoolean(v)) return { ok: false, reason: "must be a boolean" };
+			return { ok: true };
+		},
+	},
 	// -- logging ---------------------------------------------------------------
 	"logging.level": {
 		key: "logging.level",

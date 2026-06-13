@@ -154,6 +154,13 @@ export interface NightshiftConfig {
 		 * spec/plan/branch/commit/pr are owned by the nightshift orchestrator.
 		 */
 		skillsMount: string[];
+		/**
+		 * When true, on coder-run success the scheduler reads
+		 * `.nightshift/follow-ups.json` from the worktree and files each entry as a
+		 * draft task (the loop "feeds itself"). The agent is also told it may write
+		 * that file for out-of-scope findings. Draft-only — triage promotes them.
+		 */
+		fileFollowUps: boolean;
 	};
 }
 
@@ -269,6 +276,7 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
 	},
 	coder: {
 		skillsMount: ["implement", "tdd", "debug", "refactor", "review"],
+		fileFollowUps: true,
 	},
 };
 

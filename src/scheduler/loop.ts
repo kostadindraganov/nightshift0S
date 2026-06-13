@@ -39,6 +39,8 @@ import {
 import { makeBudgetEnforcer, type BudgetDeps } from "../runs/budget.ts";
 import { triageFailedRun, defaultClassifier, type TriageDeps } from "../orchestrator/triage.ts";
 import { startCoderTask } from "../orchestrator/coder.ts";
+import { fileFollowUps } from "../orchestrator/followUps.ts";
+import { getTask } from "../tasks/tasks.ts";
 import { reapRun, type ReapDeps } from "../runs/reap.ts";
 import { evaluateRun, type WatchdogDeps } from "../runs/watchdog.ts";
 import { getRun } from "../runs/runs.ts";
@@ -191,6 +193,29 @@ export async function startSchedulerLoop(
 				const run = getRun(handle, runId);
 				if (run !== null && run.state === "succeeded") {
 					await observe(capacityDeps, { provider: run.provider, kind: "ok" });
+
+					// Self-filing follow-ups ("loop feeds itself"): read the worktree's
+					// `.nightshift/follow-ups.json` and file each as a draft task. Coder
+					// runs only; a missing/empty file is a silent no-op.
+					if (
+						config.coder.fileFollowUps &&
+						run.kind === "coder" &&
+						run.worktreePath &&
+						run.taskId !== null
+					) {
+						const parentTaskId = run.taskId;
+						const worktreePath = run.worktreePath;
+						const task = getTask(handle, parentTaskId);
+						if (task !== null && task.projectId !== null) {
+							await fileFollowUps(handle, log, {
+								projectId: task.projectId,
+								parentTaskId,
+								worktreePath,
+							}).catch((err) => {
+								console.warn(`[followUps] run ${runId}:`, err instanceof Error ? err.message : err);
+							});
+						}
+					}
 				}
 			},
 		},

@@ -201,6 +201,16 @@ if (import.meta.main) {
 				if (task.description) lines.push("", `Description: ${task.description}`);
 				if (task.acceptanceCriteria) lines.push("", `Acceptance criteria: ${task.acceptanceCriteria}`);
 				lines.push("", "Make the necessary changes to satisfy the task. Commit your work when done.");
+				if (config.coder.fileFollowUps) {
+					lines.push(
+						"",
+						"If you notice out-of-scope problems (broken links, stale commands, small " +
+							"unrelated bugs), do NOT fix them — instead append them to " +
+							'`.nightshift/follow-ups.json` in the repo root as a JSON array of ' +
+							'`{"title": "...", "description": "..."}`. They will be filed as ' +
+							"follow-up tasks for later triage.",
+					);
+				}
 
 				return {
 					provider,
