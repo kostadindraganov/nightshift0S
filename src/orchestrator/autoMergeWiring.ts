@@ -27,14 +27,15 @@ import type { DbHandle } from "../db/client.ts";
 import type { EventLog } from "../events/events.ts";
 import type { NightshiftConfig } from "../config/config.ts";
 import type { TaskRow } from "../db/schema.ts";
-import { events } from "../db/schema.ts";
+import { events, tasks } from "../db/schema.ts";
 import type { ForgeClient } from "../forge/github.ts";
 import { autoMergePreflight } from "../forge/preflight.ts";
 import { mergePullRequest } from "../forge/mergeClient.ts";
 import { getThread } from "../thread/thread.ts";
 import { listRuns } from "../runs/runs.ts";
 import { getTask } from "../tasks/tasks.ts";
-import { TASK_STATE_CHANGED } from "../tasks/transitions.ts";
+import { transitionTask, TASK_STATE_CHANGED } from "../tasks/transitions.ts";
+import { confirmMergeAndUnblock } from "./coder.ts";
 import { tryAutoMerge, type AutoMergeDeps, type AutoMergeOutcome } from "./autoMerge.ts";
 
 /** Everything the merge needs, resolved per task (PHASE5C-CONTRACT §4.1 MergeContext). */
@@ -246,20 +247,72 @@ export function startAutoMergeHook(deps: {
 		filter: (ev) => ev.kind === TASK_STATE_CHANGED,
 	});
 
+	// Boot reconciliation: fire tryAutoMerge for tasks already in `approved`
+	// (the tail-only subscription above would miss state changes from before boot).
+	void (async () => {
+		const pending = deps.autoMergeDeps.handle.db
+			.select()
+			.from(tasks)
+			.where(eq(tasks.state, "approved"))
+			.all();
+		for (const task of pending) {
+			if (controller.signal.aborted) break;
+			const outcome = await tryAutoMerge(deps.autoMergeDeps, task.id);
+			deps.onOutcome?.(task.id, outcome);
+		}
+	})().catch((err) =>
+		console.warn("[autoMergeHook] boot_reconcile threw", err instanceof Error ? err.message : String(err)),
+	);
+
 	void (async () => {
 		for await (const ev of sub) {
 			let to: unknown;
 			let taskId: unknown;
+			let actor: unknown;
 			try {
-				const payload = JSON.parse(ev.payloadJson) as { to?: unknown; taskId?: unknown };
+				const payload = JSON.parse(ev.payloadJson) as { to?: unknown; taskId?: unknown; actor?: unknown };
 				to = payload.to;
 				taskId = payload.taskId;
+				actor = payload.actor;
 			} catch {
 				continue;
 			}
-			if (to !== "approved" || typeof taskId !== "number") continue;
-			const outcome = await tryAutoMerge(deps.autoMergeDeps, taskId);
-			deps.onOutcome?.(taskId, outcome);
+			if (typeof taskId !== "number") continue;
+
+			if (to === "approved") {
+				const outcome = await tryAutoMerge(deps.autoMergeDeps, taskId);
+				deps.onOutcome?.(taskId, outcome);
+				continue;
+			}
+
+			// force_merge path: a human drove needs_human → merging. Skip preflight
+			// and call mergePullRequest directly. actor === "auto_merge" is skipped
+			// to avoid re-triggering merges that auto_merge itself initiated.
+			if (to === "merging" && typeof actor === "string" && actor !== "auto_merge") {
+				const { handle, log } = deps.autoMergeDeps;
+				let mergeSha: string;
+				try {
+					mergeSha = await deps.autoMergeDeps.mergePullRequest(taskId);
+				} catch (err) {
+					const reason = err instanceof Error ? err.message : String(err);
+					console.warn("[autoMergeHook] force_merge mergePullRequest failed", { taskId, reason });
+					await transitionTask(handle, log, {
+						taskId,
+						to: "needs_human",
+						expectedFrom: "merging",
+						actor: "auto_merge",
+					});
+					deps.onOutcome?.(taskId, { outcome: "failed", reason });
+					continue;
+				}
+				const confirm = await confirmMergeAndUnblock({ handle, log }, taskId, mergeSha);
+				if (!confirm.ok) {
+					console.warn("[autoMergeHook] force_merge confirmMerge failed", { taskId, reason: confirm.reason });
+					deps.onOutcome?.(taskId, { outcome: "failed", reason: confirm.reason ?? "confirmMerge failed" });
+					continue;
+				}
+				deps.onOutcome?.(taskId, { outcome: "merged", mergeSha, unblocked: confirm.unblocked });
+			}
 		}
 	})();
 

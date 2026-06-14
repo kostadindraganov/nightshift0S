@@ -47,6 +47,8 @@ import { makeEvidenceResolveSpawn } from "../orchestrator/evidenceRouting.ts";
 import type { RepoConfig } from "../orchestrator/coder.ts";
 import { reconcileOrphansAtBoot } from "../runs/reap.ts";
 import { TmuxLauncher } from "../runs/launcher.ts";
+import { resolveGitHubToken } from "../forge/githubForgeClient.ts";
+import { GitHubRestClient } from "../forge/github.ts";
 
 export const DEFAULT_PORT = 3000;
 
@@ -324,15 +326,21 @@ if (import.meta.main) {
 						};
 					},
 				});
-				const autoMergeDeps = makeAutoMergeDeps({
-					handle,
-					log: events,
-					config,
-					forgeClient: null as never,
-					resolveMergeContext,
-				});
-				const hook = startAutoMergeHook({ log: events, autoMergeDeps });
-				shutdownTasks.push(() => hook.stop());
+				void (async () => {
+						const ghToken = await resolveGitHubToken();
+						const forgeClient = new GitHubRestClient(ghToken);
+						const autoMergeDeps = makeAutoMergeDeps({
+							handle,
+							log: events,
+							config,
+							forgeClient,
+							resolveMergeContext,
+						});
+						const hook = startAutoMergeHook({ log: events, autoMergeDeps });
+						shutdownTasks.push(() => hook.stop());
+					})().catch((err) =>
+						console.error("auto-merge hook init failed:", err instanceof Error ? err.message : err),
+					);
 			} else {
 				void makeResolveMergeContext;
 				void makeAutoMergeDeps;

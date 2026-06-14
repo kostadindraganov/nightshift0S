@@ -5,5 +5,11 @@
   "providers": {
     "defaultReviewer": "claude-code",
     "codexEnabled": false
+  },
+  "review": {
+    "autoMergeEnabled": true
+  },
+  "forge": {
+    "trustedCheckAppIds": [15368]
   }
 }
