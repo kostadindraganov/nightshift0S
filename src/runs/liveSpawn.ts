@@ -22,6 +22,8 @@
  * on macOS with fakes; the owner verifies the live paths on Linux.
  */
 
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { DbHandle } from "../db/client.ts";
 import type { EventLog } from "../events/events.ts";
 import type { TaskRow, FindingRow } from "../db/schema.ts";
@@ -30,7 +32,7 @@ import { eq, and, desc, isNotNull } from "drizzle-orm";
 import { getTask } from "../tasks/tasks.ts";
 import { createRun } from "./runs.ts";
 import { transitionRun } from "./transitions.ts";
-import { spawnRun, type SpawnDeps } from "./spawn.ts";
+import { spawnRun, type SpawnDeps, seedProviderCredentials, resolveAgentIds } from "./spawn.ts";
 import { execGit } from "../worktree/git.ts";
 import { TmuxLauncher, type Launcher } from "./launcher.ts";
 import { spawnSandboxed } from "../sandbox/spawn.ts";
@@ -62,6 +64,12 @@ export interface OneShotSpec {
 	home: string;
 	/** ro-bound provider credential dir (e.g. <home>/.claude). */
 	providerAuthDir: string;
+	/**
+	 * Optional: path to the main repo's .git directory. Required when cwd is a
+	 * linked worktree so git operations inside bwrap can resolve the gitdir pointer.
+	 * Mirrors buildCoderSandboxProfile's repoGitDir field (spawn.ts).
+	 */
+	repoGitDir?: string;
 	/** Default 600_000; on expiry kill() and throw. */
 	timeoutMs?: number;
 }
@@ -99,11 +107,20 @@ export function buildOneShotArgv(provider: string): string[] {
 /**
  * Pure env builder — minimal allowlist; NEVER a GitHub token, NIGHTSHIFT_*, or
  * SSH_AUTH_SOCK. HOST-SIDE TOKEN INVARIANT (LIVE-WIRING §0).
+ *
+ * NIGHTSHIFT_PROVIDER_BIN_DIR is prepended to PATH (when set) so that provider
+ * CLIs installed outside /home (e.g. /opt/nightshift/bin/claude) are discoverable
+ * under bwrap --clearenv (mirrors buildAgentInvocation in spawn.ts ~lines 120-125).
  */
 export function buildOneShotEnv(home: string): Record<string, string> {
 	return {
 		HOME: home,
-		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+		PATH: [
+			process.env.NIGHTSHIFT_PROVIDER_BIN_DIR,
+			"/usr/local/bin",
+			"/usr/bin",
+			"/bin",
+		].filter(Boolean).join(":"),
 		LC_ALL: "C",
 		LANG: "en_US.UTF-8",
 	};
@@ -134,12 +151,21 @@ export const spawnOneShotCaptured: OneShotSpawner = async (spec) => {
 		const hostAuthEnv = process.env.NIGHTSHIFT_CLAUDE_AUTH_DIR;
 		const hostAuthSource =
 			hostAuthEnv && !hostAuthEnv.startsWith("/home") ? hostAuthEnv : undefined;
+		// Run reviewer/planner/optimizer one-shots under the dedicated agent
+		// uid/gid (when set in env) so they are uid-scoped for nftables egress
+		// enforcement, exactly like the interactive coder. Unset ⇒ unchanged.
+		const { agentUid, agentGid } = resolveAgentIds();
 		const profile: SandboxProfile = {
 			worktreePath: spec.cwd,
 			taskHome: spec.home,
 			providerAuthDir: spec.providerAuthDir,
 			hostAuthSource,
+			// Pass repoGitDir so git operations inside bwrap succeed when the cwd is
+			// a linked worktree (mirrors buildCoderSandboxProfile in spawn.ts).
+			repoGitDir: spec.repoGitDir,
 			envAllowlist: env,
+			...(agentUid !== undefined ? { agentUid } : {}),
+			...(agentGid !== undefined ? { agentGid } : {}),
 		};
 		proc = await spawnSandboxed(profile, spec.argv);
 	} else if (process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_ONESHOTS === "1") {
@@ -169,9 +195,13 @@ export const spawnOneShotCaptured: OneShotSpawner = async (spec) => {
 	}, timeoutMs);
 
 	let stdout = "";
+	let stderr = "";
 	let exitCode: number;
 	try {
-		stdout = await new Response(proc.stdout as ReadableStream).text();
+		[stdout, stderr] = await Promise.all([
+			new Response(proc.stdout as ReadableStream).text(),
+			new Response(proc.stderr as ReadableStream).text(),
+		]);
 		exitCode = await proc.exited;
 	} finally {
 		clearTimeout(timer);
@@ -181,7 +211,8 @@ export const spawnOneShotCaptured: OneShotSpawner = async (spec) => {
 		throw new OneShotDisabledError(`one-shot timed out after ${timeoutMs}ms`);
 	}
 	if (exitCode !== 0) {
-		throw new OneShotDisabledError(`one-shot exited non-zero (${exitCode})`);
+		const stderrSuffix = stderr.trim() ? `\nstderr: ${stderr.trim()}` : "";
+		throw new OneShotDisabledError(`one-shot exited non-zero (${exitCode})${stderrSuffix}`);
 	}
 
 	return { stdout, exitCode };
@@ -343,6 +374,15 @@ export function makeRunReviewer(deps: LiveDeps): ReviewDeps["runReviewer"] {
 
 		// queued → starting → running. No tmux/watchdog for one-shots.
 		const home = `${homeRoot}/${task.id}`;
+
+		// Mirror the coder path (spawn.ts ~337-338, 373-374): ensure the per-task
+		// HOME and provider auth dir exist, then seed credentials so the reviewer
+		// CLI can find them inside the bwrap sandbox.
+		const authDir = providerAuthDir(home, provider);
+		mkdirSync(home, { recursive: true });
+		mkdirSync(authDir, { recursive: true });
+		seedProviderCredentials(authDir);
+
 		await transitionRun(deps.handle, deps.log, {
 			runId: run.id,
 			to: "starting",
@@ -357,6 +397,10 @@ export function makeRunReviewer(deps: LiveDeps): ReviewDeps["runReviewer"] {
 			actor: "reviewer",
 		});
 
+		// repoGitDir: needed for git ops inside bwrap when wt is a linked worktree
+		// (mirrors buildCoderSandboxProfile's repoDir → join(repoDir, ".git")).
+		const repoGitDir = deps.repoDir ? join(deps.repoDir, ".git") : undefined;
+
 		let result: OneShotResult;
 		try {
 			result = await spawner({
@@ -364,7 +408,8 @@ export function makeRunReviewer(deps: LiveDeps): ReviewDeps["runReviewer"] {
 				prompt: input.prompt,
 				cwd: wt,
 				home,
-				providerAuthDir: providerAuthDir(home, provider),
+				providerAuthDir: authDir,
+				repoGitDir,
 			});
 		} catch (err) {
 			// Fail-closed: failed produce → the engine escalates to needs_human.

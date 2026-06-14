@@ -49,6 +49,22 @@ export interface SandboxProfile {
    * Override for minimal images (e.g., drop /lib64 on musl systems).
    */
   roSystemDirs?: string[];
+  /**
+   * Optional: the uid the agent process should run as INSIDE the new user
+   * namespace bwrap creates. When set, buildBwrapArgs emits `--uid <agentUid>`.
+   * This is what makes nftables egress enforceable: the egress rules match
+   * `meta skuid <uid>` (src/egress/allowlist.ts), so agents must run under the
+   * dedicated agent uid for packets to be filtered rather than passed unfiltered.
+   * When unset, behaviour is exactly as before (no --uid; agent inherits the
+   * launcher uid). bwrap's --uid only works within the user namespace it already
+   * unshares, so this is Linux-runtime; the argv shape is asserted in tests.
+   */
+  agentUid?: number;
+  /**
+   * Optional: the gid the agent process should run as inside the namespace.
+   * Only emitted (`--gid <agentGid>`) when set. Independent of agentUid.
+   */
+  agentGid?: number;
 }
 
 const DEFAULT_RO_SYSTEM_DIRS = ["/usr", "/bin", "/lib", "/lib64"] as const;
@@ -90,6 +106,17 @@ export function buildBwrapArgs(p: SandboxProfile): string[] {
   args.push("--unshare-ipc");
   args.push("--unshare-uts");
   args.push("--unshare-cgroup");
+
+  // ── run as the dedicated agent uid/gid (egress enforcement) ────────────────
+  // Optional & fail-open-to-prior-behaviour: only emit --uid/--gid when the
+  // caller set them. These take effect inside the user namespace unshared above
+  // and make `meta skuid <uid>` nftables egress rules actually match the agent.
+  if (p.agentUid !== undefined) {
+    args.push("--uid", String(p.agentUid));
+  }
+  if (p.agentGid !== undefined) {
+    args.push("--gid", String(p.agentGid));
+  }
 
   // ── clean environment (allowlist follows) ─────────────────────────────────
   args.push("--clearenv");

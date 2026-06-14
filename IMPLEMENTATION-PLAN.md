@@ -20,12 +20,12 @@ WHAT IS NOW LIVE (this 2026-06-14 wave, on top of the prior code-complete base):
 - **Built+tested modules awaiting only runtime/architecture to wire:** tiebreaker live spawn
   (7.7), container-spawn selector (7.1).
 
-WHAT REMAINS = runtime/infra/architecture only (NOT connectable code) — see the GATE-5
-worklist at the end of Phase 8: nftables egress needs a SEPARATE agent uid (control plane
-+ agents share uid 1000); container needs docker; tiebreaker needs a Verdict-level review
-restructure; remote workers/preview/CMA/playwright/prompt-optimize need infra/keys/a
-dispatcher; the "fix typo" e2e needs a dedicated target repo + an explicit go (outward-facing
-push). Specs that bind every task below:
+WHAT REMAINS = infra/keys/other-machine/owner-go items only (all code is now authored) —
+see `ops/RUNBOOK-GATE5.md` for the step-by-step operator checklist: apply nftables rules
+(`egress-apply.sh` with NIGHTSHIFT_AGENT_UID=999 — ruleset authored, kernel load is an
+operator step), provision remote worker hosts (7.2), configure preview DNS/reverse-proxy
+(7.4), supply CMA_API_KEY (7.5), give explicit go for outward-facing push on "fix typo"
+e2e. Specs that bind every task below:
 `docs/BLUEPRINT.md` (§3.12 overrides), `docs/SPEC-STATE-MACHINES.md`,
 `docs/SPEC-SCHEMA.md`, `docs/THREAT-MODEL.md`, `REUSE.md`.
 
@@ -509,9 +509,14 @@ ready task is skipped, never a pretend spawn). GATE-5 worklist status:
     headless shell downloaded to `/home/nightshift/.cache/ms-playwright/`. Browser deps installed via
     `playwright install-deps chromium`. Lazy import in `src/verify/browser.ts` will now succeed.
     Gate remains off by default per project; opt-in via project settings.
-  - ☑ **nftables egress ACTIVE (2.4 LIVE)**: `nftables` installed; `ops/egress-apply.sh` applied with
-    `NIGHTSHIFT_EGRESS_UID=999`; table `inet nightshift_egress_uid999` loaded with default-DROP + allowlist
-    for `github.com`, `api.github.com`, `api.anthropic.com`, `api.openai.com`. uid 999 = nightshift-agent.
+  - ☐ **nftables egress kernel load (2.4 — operator step)**: ruleset authored in `ops/egress-apply.sh`
+    (default-DROP + allowlist for `github.com`, `api.github.com`, `api.anthropic.com`, `api.openai.com`,
+    uid-scoped to `NIGHTSHIFT_AGENT_UID`). `egress-apply.sh` was NOT yet run against the kernel;
+    loading it is an operator step documented in `ops/RUNBOOK-GATE5.md`. The agent-uid code
+    (`resolveAgentIds` in `src/runs/spawn.ts`, `agentUid/agentGid` in `src/sandbox/profile.ts`,
+    plumbed through `buildCoderSandboxProfile` and `spawnOneShotCaptured` in `src/runs/liveSpawn.ts`)
+    is authored and tested — once the operator sets `NIGHTSHIFT_AGENT_UID=999` and runs
+    `egress-apply.sh`, the kernel rules will correctly match the agent process uid.
   - ☑ **Docker installed + running (7.1 LIVE)**: `docker.io` installed and `docker` service started;
     `nightshift` user added to `docker` group; `docker run hello-world` passes. `makeIsolatedSpawn` is
     already wired (containerSpawn.ts) — enable via `container.enabled=true` in config.
@@ -519,13 +524,38 @@ ready task is skipped, never a pretend spawn). GATE-5 worklist status:
     auth dir (already set in `/etc/nightshift/env`); service restarted — all one-shot spawns
     (reviewer/planner/prompt-optimizer) now honour it via `spawnOneShotCaptured`.
   - ☑ **Nightshift service restarted** — all new env vars active; `/healthz` + `/readyz` ok.
+  - ☑ **Reviewer one-shot fix**: `spawnOneShotCaptured` now drains stderr in parallel with stdout,
+    surfaces it in the error message, seeds provider credentials into the per-task HOME, and prepends
+    `NIGHTSHIFT_PROVIDER_BIN_DIR` to PATH so `claude --print` is findable under `bwrap --clearenv`.
+    (`src/runs/liveSpawn.ts`, `src/runs/spawn.ts` `seedProviderCredentials`)
+  - ☑ **Agent-uid egress scoping**: `resolveAgentIds()` reads `NIGHTSHIFT_AGENT_UID`/`NIGHTSHIFT_AGENT_GID`
+    from env; `buildCoderSandboxProfile` and `spawnOneShotCaptured` both pass `agentUid`/`agentGid`
+    into `SandboxProfile` → `buildBwrapArgs` emits `--uid`/`--gid` so nftables `meta skuid` rules match.
+    (`src/runs/spawn.ts`, `src/sandbox/profile.ts`, `src/runs/liveSpawn.ts`)
+  - ☑ **containerConfig threading**: `SpawnPlan.containerConfig` and `StartCoderTaskInput.containerConfig`
+    field added; threaded through `scheduler.ts` → `coder.ts` → `spawnRun` so the container
+    isolation policy from config reaches `makeIsolatedSpawn` end-to-end.
+    (`src/scheduler/scheduler.ts`, `src/orchestrator/coder.ts`, `src/runs/spawn.ts`)
+  - ☑ **AGENTS.md live scan**: `makeAgentsMdRoutes` factory added to `agentsMdRoutes.ts` with an
+    injected `resolveRepoDir` closure; when the resolver returns a path, `scanRepoSnapshot` is
+    called for accurate output (stub is now a fail-soft fallback only). Tests cover both paths.
+    (`src/maintenance/agentsMdRoutes.ts`, `src/maintenance/agentsMd.test.ts`)
+  - ☑ **Preview CommandDeployer**: `CommandDeployer` class + `makeDeployer` factory + `startPreviewReaper`
+    added to `preview.ts`; args are always passed as an array (no shell interpolation); `makeDeployer`
+    selects `CommandDeployer` when `preview.enabled=true` and both commands configured, else
+    `FailClosedDeployer`. Wiring to DNS/reverse-proxy is still an operator/infra step (7.4).
+    (`src/preview/preview.ts`, `src/preview/preview.test.ts`)
+  - ☑ **Worker daemon**: `src/scheduler/workerDaemon.ts` authored — remote-host daemon that registers
+    with the control plane and heartbeats; `pickWorker` + `startWorkerReaper` added to `workers.ts`;
+    all IO injected (fail-closed on transient errors). Physical 2nd machine is still an operator step (7.2).
+    (`src/scheduler/workerDaemon.ts`, `src/scheduler/workerDaemon.test.ts`, `src/scheduler/workers.ts`)
   - ☐ **Remaining runtime surfaces:** remote worker daemons (7.2 — needs other machines); live preview
     deploy/reverse-proxy/DNS (7.4); live CMA API + conformance (7.5 — needs CMA_API_KEY);
     "fix typo" end-to-end (◑ — egress active, NIGHTSHIFT_CLAUDE_AUTH_DIR set, ready for live coder run —
     scheduler will auto-pick `ready` tasks; push→PR→merge needs explicit go from owner).
-  - ☑ **nightshift-agent system user created** (uid: 999) for future uid-scoped nftables egress;
-    ops/egress-apply.sh updated to reference agent uid. Remaining egress gap: nftables rules not yet
-    applied (nft binary availability + rule testing needed).
+  - ☑ **nightshift-agent system user created** (uid: 999); `ops/egress-apply.sh` references
+    `NIGHTSHIFT_AGENT_UID`. Agent-uid code authored + tested (see nftables item above). Kernel
+    load is an operator step — see `ops/RUNBOOK-GATE5.md`.
 
 ---
 

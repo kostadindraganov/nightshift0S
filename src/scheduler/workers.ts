@@ -105,6 +105,104 @@ export class WorkerRegistry {
 }
 
 // ---------------------------------------------------------------------------
+// Scheduler consumption hook (lease-based worker selection)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pure selection helper the scheduler MAY consult to place a ready task on a
+ * remote worker. Picks an available, non-stale worker from a snapshot of
+ * registry.list(). ADDITIVE: the existing local-spawn path stays the default
+ * when workers.enabled=false — this is only consulted when workers are on.
+ *
+ * Selection policy:
+ *   - Only `alive` workers (live lease) are eligible — stale workers skipped.
+ *   - Only workers with capacity > 0 are eligible.
+ *   - Among eligible, the one with the highest capacity wins (most headroom);
+ *     ties broken by id (ascending) for deterministic placement.
+ *
+ * FAIL-CLOSED: returns undefined when no live worker is eligible, so the
+ * scheduler falls back to its local-spawn path rather than placing a task on a
+ * dead host.
+ */
+export function pickWorker(
+	workers: readonly WorkerInfo[],
+	opts?: { enabled?: boolean },
+): WorkerInfo | undefined {
+	// Inert unless explicitly enabled — guards against accidental remote placement.
+	if (opts !== undefined && opts.enabled === false) return undefined;
+
+	let best: WorkerInfo | undefined;
+	for (const w of workers) {
+		if (!w.alive) continue; // skip stale
+		if (w.capacity <= 0) continue; // no headroom
+		if (
+			best === undefined ||
+			w.capacity > best.capacity ||
+			(w.capacity === best.capacity && w.id < best.id)
+		) {
+			best = w;
+		}
+	}
+	return best;
+}
+
+// ---------------------------------------------------------------------------
+// Reaper — reclaim stale workers on a cadence
+// ---------------------------------------------------------------------------
+
+export interface StartWorkerReaperDeps {
+	/** The registry to sweep (defaults to the module singleton at the call site). */
+	registry: WorkerRegistry;
+	/** Lease age (seconds) past which a silent worker is reclaimed. */
+	leaseSeconds: number;
+	/** Interval in milliseconds between reap sweeps. */
+	intervalMs: number;
+	/** Injectable clock (default Date.now). Injected in tests. */
+	now?: () => number;
+	/** Injectable interval scheduler (default setInterval). Injected in tests. */
+	setIntervalImpl?: (fn: () => void, ms: number) => unknown;
+	/** Injectable interval clearer (default clearInterval). Injected in tests. */
+	clearIntervalImpl?: (handle: unknown) => void;
+}
+
+/**
+ * Start the stale-worker reaper background loop.
+ *
+ * INERT WHEN DISABLED: callers (v2Boot) must guard on workers.enabled before
+ * calling; the loop itself is unconditional once started.
+ *
+ * FAIL-CLOSED: a reclaim error is logged and swallowed so the interval survives
+ * individual sweep failures (consistent with the preview reaper pattern).
+ */
+export function startWorkerReaper(deps: StartWorkerReaperDeps): { stop(): void } {
+	const clockFn = deps.now ?? (() => Date.now());
+	const setIntervalImpl: (fn: () => void, ms: number) => unknown =
+		deps.setIntervalImpl ?? ((fn, ms) => setInterval(fn, ms));
+	const clearIntervalImpl: (handle: unknown) => void =
+		deps.clearIntervalImpl ?? ((h) => clearInterval(h as ReturnType<typeof setInterval>));
+
+	const timerId = setIntervalImpl(() => {
+		try {
+			const reclaimed = deps.registry.reclaimStale(clockFn(), deps.leaseSeconds);
+			if (reclaimed.length > 0) {
+				console.log(`[workerReaper] reclaimed stale workers: ${reclaimed.join(", ")}`);
+			}
+		} catch (err) {
+			console.error(
+				"[workerReaper] sweep error:",
+				err instanceof Error ? err.message : String(err),
+			);
+		}
+	}, deps.intervalMs);
+
+	return {
+		stop(): void {
+			clearIntervalImpl(timerId);
+		},
+	};
+}
+
+// ---------------------------------------------------------------------------
 // Module-level singleton (matches capacity.ts pattern)
 // ---------------------------------------------------------------------------
 

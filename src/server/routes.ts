@@ -27,7 +27,7 @@ import { experimentRoutes } from "../experiment/experimentRoutes.ts";
 import { promptOptimizeRoutes } from "../experiment/promptOptimizeRoutes.ts";
 import { memoryRoutes } from "../memory/memoryRoutes.ts";
 import { analyticsRoutes } from "../analytics/analyticsRoutes.ts";
-import { agentsMdRoutes } from "../maintenance/agentsMdRoutes.ts";
+import { makeAgentsMdRoutes } from "../maintenance/agentsMdRoutes.ts";
 import { workersRoutes } from "../scheduler/workersRoutes.ts";
 import { cliUpdateRoutes } from "../providers/cliUpdateRoutes.ts";
 import { previewRoutes } from "../preview/previewRoutes.ts";
@@ -731,7 +731,20 @@ export const routes: Route[] = [
 	// -- analytics + evidence-based routing (Phase 6, §3.7) -------------------
 	...analyticsRoutes,
 	// -- AGENTS.md auto-maintenance proposal (Phase 6) ------------------------
-	...agentsMdRoutes,
+	// resolveRepoDir mirrors the logic in main.ts: NIGHTSHIFT_REPO_DIR takes
+	// priority (single-repo deployments); otherwise derives the path from
+	// NIGHTSHIFT_CHECKOUT_ROOT + the <owner>/<repo> slug in the remote URL.
+	// Fail-soft: returns null when the URL cannot be parsed → stub fallback.
+	...makeAgentsMdRoutes({
+		resolveRepoDir: (repoUrl: string): string | null => {
+			const explicit = process.env.NIGHTSHIFT_REPO_DIR;
+			if (explicit) return explicit;
+			const checkoutRoot = process.env.NIGHTSHIFT_CHECKOUT_ROOT ?? "/opt/nightshift/repos";
+			const m = repoUrl.match(/[:/]([^/:]+\/[^/.]+?)(?:\.git)?$/);
+			if (!m) return null;
+			return `${checkoutRoot}/${m[1]}`;
+		},
+	}),
 	// -- multi-VM worker registry (Phase 7 V3, §infra) ------------------------
 	...workersRoutes,
 	// -- CLI auto-update / version status (Phase 7 V3, §infra) ----------------

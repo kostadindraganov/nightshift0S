@@ -167,6 +167,11 @@ export async function startSchedulerLoop(
 					prompt: plan.prompt,
 					repoDir: plan.repoDir,
 					homeRoot: plan.homeRoot,
+					skillsMount: plan.skillsMount,
+					// Container isolation policy: prefer the per-task plan override,
+					// else the global config.container. Disabled (enabled=false) makes
+					// the container path a pure passthrough to the bwrap sandbox.
+					containerConfig: plan.containerConfig ?? config.container,
 					unattended: true,
 					trustedRepo: config.sandbox.unattendedUntrustedRepos,
 				});

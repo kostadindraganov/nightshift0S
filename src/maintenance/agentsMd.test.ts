@@ -9,18 +9,22 @@
  *   4. LlmRefine hook: applied if provided, fail-closed if it throws.
  *   5. FAIL-CLOSED: secrets/tokens never in error payloads, project_not_found → 404,
  *      bad project id → 400, route returns well-formed JSON body.
+ *   6. Injected resolver: makeAgentsMdRoutes uses live scan when resolver returns a dir,
+ *      stub fallback when resolver returns null.
  *
  * All tests are hermetic: no real FS, no network. Snapshots are fakes.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { RepoSnapshot, AgentsMdProposal } from "./agentsMd.ts";
 import {
 	proposeAgentsMd,
 	mergeManagedBlock,
 	type LlmRefine,
 } from "./agentsMd.ts";
-import { agentsMdRoutes } from "./agentsMdRoutes.ts";
+import { agentsMdRoutes, makeAgentsMdRoutes } from "./agentsMdRoutes.ts";
 import { openDatabase, type DbHandle } from "../db/client.ts";
 import { runMigrations } from "../db/migrate.ts";
 import { EventLog } from "../events/events.ts";
@@ -761,5 +765,167 @@ describe("agentsMdRoutes: GET /projects/:id/agents-md/proposal", () => {
 
 		expect(route).toBeDefined();
 		expect(route?.auth).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Test: makeAgentsMdRoutes — injected resolver + live scanner vs. stub fallback
+// ---------------------------------------------------------------------------
+
+describe("makeAgentsMdRoutes: injected resolveRepoDir", () => {
+	/** Invoke a route built from makeAgentsMdRoutes, returns { status, body }. */
+	async function callMadeRoute(
+		routes: ReturnType<typeof makeAgentsMdRoutes>,
+		routePath: string,
+		params: Record<string, string> = {},
+	): Promise<{ status: number; body: Record<string, unknown> }> {
+		const route = routes.find((r) => r.path === routePath);
+		if (route === undefined) throw new Error(`Route not found: ${routePath}`);
+		const req = new Request(`http://localhost${routePath}`);
+		const url = new URL(req.url);
+		const ctx = { req, url, params, handle, events: log };
+		const res = await route.handler(ctx);
+		const body = (await res.json()) as Record<string, unknown>;
+		return { status: res.status, body };
+	}
+
+	test("uses live scanRepoSnapshot when resolver returns a real dir", async () => {
+		// Build a minimal temp repo so scanRepoSnapshot returns meaningful data.
+		const tempDir = mkdtempSync(join(process.cwd(), ".test-agents-md-"));
+		try {
+			writeFileSync(join(tempDir, "bun.lock"), "");
+			writeFileSync(
+				join(tempDir, "package.json"),
+				JSON.stringify({ name: "live-repo", scripts: { test: "bun test", build: "bun run compile" } }),
+			);
+			writeFileSync(join(tempDir, "README.md"), "# Live Repo");
+			mkdirSync(join(tempDir, "src"), { recursive: true });
+			writeFileSync(join(tempDir, "src", "index.test.ts"), "");
+
+			const id = seedProject("live-project");
+
+			// Inject a resolver that always maps to the temp dir.
+			const routes = makeAgentsMdRoutes({
+				resolveRepoDir: () => tempDir,
+			});
+
+			const { status, body } = await callMadeRoute(
+				routes,
+				"/projects/:id/agents-md/proposal",
+				{ id: String(id) },
+			);
+
+			expect(status).toBe(200);
+			const typed = body as {
+				project_id: number;
+				proposal: string;
+				changed: boolean;
+				sections: string[];
+				note: string;
+			};
+			expect(typed.project_id).toBe(id);
+			// Live scan note — should NOT mention "stub snapshot".
+			expect(typed.note).toContain("live host-side repo scan");
+			expect(typed.note).not.toContain("stub snapshot");
+			// Proposal should reflect real repo data: bun runtime + real scripts.
+			expect(typed.proposal).toContain("`bun`");
+			expect(typed.proposal).toContain("`bun test`");
+			expect(typed.proposal).toContain("README.md");
+			expect(typed.proposal).toContain("<!-- nightshift:agents-md:begin -->");
+			expect(typed.sections.length).toBeGreaterThan(0);
+		} finally {
+			try {
+				const { rmSync } = await import("node:fs");
+				rmSync(tempDir, { recursive: true, force: true });
+			} catch {
+				// best-effort cleanup
+			}
+		}
+	});
+
+	test("uses stub fallback when resolver returns null (resolver provided, returns null)", async () => {
+		const id = seedProject("unmapped-project");
+
+		const routes = makeAgentsMdRoutes({
+			resolveRepoDir: () => null,
+		});
+
+		const { status, body } = await callMadeRoute(
+			routes,
+			"/projects/:id/agents-md/proposal",
+			{ id: String(id) },
+		);
+
+		expect(status).toBe(200);
+		const typed = body as { note: string; proposal: string };
+		// Stub fallback: note mentions "stub snapshot" and "host-side" scan.
+		expect(typed.note).toContain("stub snapshot");
+		expect(typed.note).toMatch(/host.*scan|host-side/i);
+		// Proposal should still be valid AGENTS.md.
+		expect(typed.proposal).toContain("<!-- nightshift:agents-md:begin -->");
+	});
+
+	test("uses stub fallback when no resolver is provided (default)", async () => {
+		const id = seedProject("no-resolver-project");
+
+		// No resolveRepoDir injected — should fall back to stub.
+		const routes = makeAgentsMdRoutes();
+
+		const { status, body } = await callMadeRoute(
+			routes,
+			"/projects/:id/agents-md/proposal",
+			{ id: String(id) },
+		);
+
+		expect(status).toBe(200);
+		const typed = body as { note: string; proposal: string };
+		expect(typed.note).toContain("stub snapshot");
+		expect(typed.proposal).toContain("<!-- nightshift:agents-md:begin -->");
+	});
+
+	test("live scan note does NOT mention GATE-5 (TODO removed)", async () => {
+		const tempDir = mkdtempSync(join(process.cwd(), ".test-agents-md-"));
+		try {
+			writeFileSync(join(tempDir, "bun.lock"), "");
+			writeFileSync(
+				join(tempDir, "package.json"),
+				JSON.stringify({ name: "repo", scripts: { test: "bun test" } }),
+			);
+			const id = seedProject("gate5-check-project");
+
+			const routes = makeAgentsMdRoutes({ resolveRepoDir: () => tempDir });
+			const { body } = await callMadeRoute(
+				routes,
+				"/projects/:id/agents-md/proposal",
+				{ id: String(id) },
+			);
+			const typed = body as { note: string };
+			// The GATE-5 TODO is removed — the note for a live scan must not reference it.
+			expect(typed.note).not.toContain("GATE-5");
+		} finally {
+			try {
+				const { rmSync } = await import("node:fs");
+				rmSync(tempDir, { recursive: true, force: true });
+			} catch {
+				// best-effort cleanup
+			}
+		}
+	});
+
+	test("stub fallback still returns valid proposal when project is found", async () => {
+		const id = seedProject("stub-valid-proposal");
+
+		const routes = makeAgentsMdRoutes({ resolveRepoDir: () => null });
+		const { status, body } = await callMadeRoute(
+			routes,
+			"/projects/:id/agents-md/proposal",
+			{ id: String(id) },
+		);
+
+		expect(status).toBe(200);
+		const typed = body as { project_id: number; changed: boolean; sections: string[] };
+		expect(typed.project_id).toBe(id);
+		expect(typed.changed).toBe(true);
+		expect(typed.sections.length).toBeGreaterThan(0);
 	});
 });

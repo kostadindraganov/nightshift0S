@@ -42,6 +42,7 @@ import {
 	type RepoConfig,
 } from "./coder.ts";
 import { FakeLauncher } from "../runs/launcher.ts";
+import type { NightshiftConfig } from "../config/config.ts";
 import { EgressInactiveError } from "../egress/guard.ts";
 
 // ---------------------------------------------------------------------------
@@ -832,5 +833,200 @@ describe("startCoderTask egress gate", () => {
 		const taskRuns = handle.db.select().from(runs).where(eq(runs.taskId, taskId)).all();
 		expect(taskRuns).toHaveLength(1);
 		expect(taskRuns[0]?.state).toBe("killed");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// startCoderTask — container isolation config threading (TASK 3)
+//
+// Proves StartCoderTaskInput.containerConfig is threaded through to spawnRun.
+// DISABLED (enabled=false) MUST be a pure passthrough to the existing bwrap
+// sandbox path — identical launch command to "no containerConfig at all".
+// ENABLED routes through makeIsolatedSpawn (the container selector); on a host
+// without the runtime it fails closed, proving the config actually reached the
+// selector rather than being silently dropped.
+// ---------------------------------------------------------------------------
+
+describe("startCoderTask container config threading", () => {
+	const disabledContainer: NightshiftConfig["container"] = {
+		enabled: false,
+		runtime: "docker",
+		image: "nightshift:latest",
+		network: "none",
+		memLimit: "4g",
+		cpuLimit: "2",
+	};
+
+	function seedReadyTask(): number {
+		const now = new Date().toISOString();
+		return handle.db
+			.insert(tasks)
+			.values({
+				projectId,
+				title: "container task",
+				state: "ready",
+				priority: 0,
+				createdAt: now,
+				updatedAt: now,
+			})
+			.returning()
+			.get().id;
+	}
+
+	// A launcher that captures the command it was asked to launch.
+	function makeCapturingLauncher(): {
+		launcher: import("../runs/launcher.ts").Launcher;
+		lastCommand: () => string[] | null;
+	} {
+		let captured: string[] | null = null;
+		const launcher: import("../runs/launcher.ts").Launcher = {
+			async launch(spec) {
+				captured = spec.command;
+				return { sessionName: spec.sessionName };
+			},
+			async isAlive() {
+				return true;
+			},
+			async kill() {
+				/* no-op */
+			},
+		};
+		return { launcher, lastCommand: () => captured };
+	}
+
+	const prev = process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER;
+	beforeEach(() => {
+		// Get past the off-Linux bwrap fail-closed so the bwrapFallback returns the
+		// bare inner command — making the disabled passthrough deterministic on macOS.
+		process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER = "1";
+	});
+	afterEach(() => {
+		if (prev === undefined) delete process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER;
+		else process.env.NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER = prev;
+	});
+
+	test("container DISABLED is a pure passthrough — same launch command as no containerConfig", async () => {
+		// Baseline: no containerConfig at all.
+		const baselineTaskId = seedReadyTask();
+		const baseCap = makeCapturingLauncher();
+		const baseResult = await startCoderTask(
+			{ handle, log, launcher: baseCap.launcher },
+			{
+				taskId: baselineTaskId,
+				provider: "claude-code",
+				model: "cli-default",
+				authLane: "subscription",
+				prompt: "do the work",
+				repoDir,
+				homeRoot: repoDir,
+				unattended: false,
+			},
+			{ egressActive: async () => true },
+		);
+		expect(baseResult.ok).toBe(true);
+		const baselineCmd = baseCap.lastCommand();
+		expect(baselineCmd).not.toBeNull();
+
+		// With an explicitly DISABLED container config.
+		const disabledTaskId = seedReadyTask();
+		const disabledCap = makeCapturingLauncher();
+		const disabledResult = await startCoderTask(
+			{ handle, log, launcher: disabledCap.launcher },
+			{
+				taskId: disabledTaskId,
+				provider: "claude-code",
+				model: "cli-default",
+				authLane: "subscription",
+				prompt: "do the work",
+				repoDir,
+				homeRoot: repoDir,
+				unattended: false,
+				containerConfig: disabledContainer,
+			},
+			{ egressActive: async () => true },
+		);
+		expect(disabledResult.ok).toBe(true);
+		const disabledCmd = disabledCap.lastCommand();
+		expect(disabledCmd).not.toBeNull();
+
+		// Pure passthrough: the disabled-container launch command took the EXACT
+		// same bwrapFallback branch as the no-containerConfig baseline. The two
+		// commands cannot be byte-compared (each run has a random worktree-hash and
+		// a runId-derived prompt temp file), so assert the structural invariants:
+		//   - same leading token (bwrap on Linux / sh under the macOS escape hatch),
+		//   - same token count,
+		//   - NO container runtime tokens injected (the container path was inert).
+		expect(disabledCmd![0]).toBe(baselineCmd![0]);
+		expect(disabledCmd!.length).toBe(baselineCmd!.length);
+		// Both wrap the SAME inner coder one-liner (cat+rm+exec prompt-via-file),
+		// confirming the disabled path produced the bwrapFallback shape, not a
+		// container argv.
+		expect(disabledCmd!.join(" ")).toContain("exec");
+		expect(baselineCmd!.join(" ")).toContain("exec");
+		// No container runtime tokens leaked into the disabled path — it is inert.
+		expect(disabledCmd!.join(" ")).not.toContain("docker");
+		expect(disabledCmd).not.toContain("--rm");
+		expect(disabledCmd).not.toContain("--network");
+	});
+
+	test("container ENABLED routes through the container selector (config reaches makeIsolatedSpawn)", async () => {
+		const enabledContainer: NightshiftConfig["container"] = {
+			...disabledContainer,
+			enabled: true,
+		};
+		const taskId = seedReadyTask();
+		const cap = makeCapturingLauncher();
+
+		const result = await startCoderTask(
+			{ handle, log, launcher: cap.launcher },
+			{
+				taskId,
+				provider: "claude-code",
+				model: "cli-default",
+				authLane: "subscription",
+				prompt: "do the work",
+				repoDir,
+				homeRoot: repoDir,
+				unattended: false,
+				containerConfig: enabledContainer,
+			},
+			{ egressActive: async () => true },
+		);
+
+		const cmd = cap.lastCommand();
+		const dockerAvailable =
+			process.platform === "linux" && Bun.which("docker") !== null;
+
+		if (dockerAvailable) {
+			// Linux host with docker present → the container argv (buildContainerArgv
+			// via buildInteractiveContainerArgv) is built and handed to the launcher.
+			// That argv begins with the `run --rm` subcommand and carries the
+			// container flags + image from the threaded enabledContainer config —
+			// proving the config reached makeIsolatedSpawn and the container path was
+			// taken (vs. the bare bwrap `sh -c` one-liner the disabled test produced).
+			expect(result.ok).toBe(true);
+			expect(cmd).not.toBeNull();
+			expect(cmd![0]).toBe("run");
+			expect(cmd).toContain("--rm");
+			expect(cmd).toContain("--network");
+			expect(cmd).toContain(enabledContainer.network);
+			expect(cmd).toContain(enabledContainer.image);
+			// The inner coder one-liner is appended after the image.
+			expect(cmd!.join(" ")).toContain("exec");
+		} else {
+			// No runtime (macOS or Linux without docker) → makeIsolatedSpawn fails
+			// closed with ContainerUnavailableError. startCoderTask catches the spawn
+			// throw, rolls back, and returns a refusal whose reason names the
+			// container — proving the enabled config reached the selector and was NOT
+			// silently dropped to the bwrap path (which would have succeeded above).
+			expect(result.ok).toBe(false);
+			if (!result.ok) {
+				expect(result.reason.toLowerCase()).toContain("container");
+			}
+			// Launcher never received a command (selector threw before launch).
+			expect(cmd).toBeNull();
+			// Rolled back: task → failed, run → killed (no zombie slot/cap).
+			expect(getTask(handle, taskId)?.state).toBe("failed");
+		}
 	});
 });

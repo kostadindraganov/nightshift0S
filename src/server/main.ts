@@ -167,6 +167,17 @@ if (import.meta.main) {
 		onReady: ({ handle, events }) => {
 			const config = loadConfig();
 
+			// Egress enforcement default: the nftables ruleset filters
+			// `meta skuid <uid>` (src/egress/allowlist.ts), so live agents MUST run
+			// under the dedicated agent uid or their packets pass unfiltered. Default
+			// NIGHTSHIFT_AGENT_UID to the conventional agent uid (999) at this
+			// entrypoint ONLY — profile.ts/resolveAgentIds stay env-pure, and unit
+			// tests / macOS (which never reach this entrypoint) keep prior behaviour.
+			// An explicit env value (including "" to opt out) always wins.
+			if (process.env.NIGHTSHIFT_AGENT_UID === undefined) {
+				process.env.NIGHTSHIFT_AGENT_UID = "999";
+			}
+
 			// Boot safety net: reconcile any runs whose tmux sessions died across a restart.
 			void reconcileOrphansAtBoot({ handle, log: events, launcher: new TmuxLauncher() })
 				.then((n) => { if (n > 0) console.log(`boot_reconcile: ${n} orphaned run(s) → interrupted`); })
@@ -256,6 +267,10 @@ if (import.meta.main) {
 					repoDir,
 					homeRoot: config.sandbox.homeRoot,
 					skillsMount: config.coder.skillsMount,
+					// V3 container isolation policy (config.container). Threaded to
+					// spawnRun → makeIsolatedSpawn. Default OFF (enabled=false) is a
+					// pure passthrough to the existing bwrap sandbox path.
+					containerConfig: config.container,
 				};
 			}
 

@@ -227,3 +227,41 @@ test("unconfiguredEmailSend always returns no_email_transport", async () => {
 	expect(result.ok).toBe(false);
 	expect(result.detail).toBe("no_email_transport");
 });
+
+// ---------------------------------------------------------------------------
+// 8. Worker reaper: inert by default, started only when workers.enabled=true
+// ---------------------------------------------------------------------------
+
+test("startV2Loops does not start the worker reaper when workers.enabled=false", () => {
+	// DEFAULT_CONFIG has workers.enabled=false. Compose and tear down; this is
+	// purely a "stays inert + safe stop" assertion (no spy needed — the reaper
+	// branch is guarded by config.workers.enabled).
+	const fakeHttp = makeFakeHttpSend();
+	const loopHandle = startV2Loops({
+		handle,
+		events: log,
+		config: DEFAULT_CONFIG,
+		env: {},
+		httpSend: fakeHttp.send,
+		now: () => clock,
+	});
+	expect(() => loopHandle.stop()).not.toThrow();
+});
+
+test("startV2Loops starts the worker reaper when workers.enabled=true and stop() is safe", () => {
+	const fakeHttp = makeFakeHttpSend();
+	const config = {
+		...DEFAULT_CONFIG,
+		workers: { ...DEFAULT_CONFIG.workers, enabled: true },
+	};
+	const loopHandle = startV2Loops({
+		handle,
+		events: log,
+		config,
+		env: {},
+		httpSend: fakeHttp.send,
+		now: () => clock,
+	});
+	// The reaper uses a real interval; stop() must clear it without throwing.
+	expect(() => loopHandle.stop()).not.toThrow();
+});

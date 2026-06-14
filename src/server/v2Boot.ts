@@ -23,6 +23,7 @@
  *      Slack when SLACK_WEBHOOK_URL. Email only if host injects an EmailSend.
  *   3. Event bridge (only when channels.length > 0).
  *   4. Standup digest scheduler (only when channels.length > 0).
+ *   5. Preview idle-reap loop (only when preview.enabled=true).
  */
 
 import type { DbHandle } from "../db/client.ts";
@@ -41,6 +42,13 @@ import { makeDigestScheduler } from "../notify/digest.ts";
 import type { DigestScheduler } from "../notify/digest.ts";
 import { startTriggerScheduler } from "../triggers/triggers.ts";
 import { fetchHttpSend } from "../notify/transports.ts";
+import {
+	makePreviewManager,
+	makeDeployer,
+	startPreviewReaper,
+	type CommandRunner,
+} from "../preview/preview.ts";
+import { startWorkerReaper, workerRegistry } from "../scheduler/workers.ts";
 
 // Re-export HttpSend so callers can import it from here (the canonical
 // definition lives in telegram.ts; all channel types share the same shape).
@@ -71,6 +79,12 @@ export interface V2BootDeps {
 	 * () => new Date(). Injected in tests for deterministic time control.
 	 */
 	now?: () => Date;
+	/**
+	 * Injectable command runner for the preview CommandDeployer. Defaults to
+	 * defaultCommandRunner (Bun.spawn). Injected in tests to avoid real
+	 * subprocess spawning.
+	 */
+	previewRun?: CommandRunner;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +102,11 @@ const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
  * scheduler runs (but fires nothing without trigger rows), and the bridge +
  * digest are skipped (no channels → nothing to deliver to).
  */
+// Preview reaper interval: one sweep per minute.
+const PREVIEW_REAPER_INTERVAL_MS = 60_000;
+// Worker stale-reaper interval: one sweep per minute.
+const WORKER_REAPER_INTERVAL_MS = 60_000;
+
 export function startV2Loops(deps: V2BootDeps): { stop(): void } {
 	const { handle, events: log, now: clockFn } = deps;
 	const env = deps.env ?? process.env;
@@ -98,6 +117,8 @@ export function startV2Loops(deps: V2BootDeps): { stop(): void } {
 	let triggerScheduler: { stop(): void } | null = null;
 	let bridge: EventBridge | null = null;
 	let digest: DigestScheduler | null = null;
+	let previewReaper: { stop(): void } | null = null;
+	let workerReaper: { stop(): void } | null = null;
 
 	// 1. Cron trigger scheduler — always started; harmless without cron rows.
 	try {
@@ -142,6 +163,55 @@ export function startV2Loops(deps: V2BootDeps): { stop(): void } {
 		}
 	}
 
+	// 5. Preview idle-reap loop — only when preview.enabled=true.
+	//    The deployer is selected by makeDeployer: CommandDeployer when
+	//    commands are configured, FailClosedDeployer otherwise.
+	//    The manager is constructed inline (stateless across restarts; envs
+	//    live only in memory on the singleton manager in previewRoutes.ts, so
+	//    this reaper uses its own manager — consistent with the design that
+	//    startV2Loops is a pure background-loop composer injecting no shared
+	//    state across modules).
+	if (deps.config.preview.enabled) {
+		try {
+			const previewCfg = deps.config.preview as {
+				enabled: boolean;
+				domain: string;
+				idleReapMinutes: number;
+				deployCommand?: string[];
+				teardownCommand?: string[];
+			};
+			const deployer = makeDeployer(previewCfg, deps.previewRun);
+			const manager = makePreviewManager({
+				deployer,
+				domain: previewCfg.domain,
+			});
+			previewReaper = startPreviewReaper({
+				manager,
+				idleReapMinutes: previewCfg.idleReapMinutes,
+				intervalMs: PREVIEW_REAPER_INTERVAL_MS,
+				now: () => Date.now(),
+			});
+		} catch {
+			// Fail-closed: preview reaper failure is isolated.
+		}
+	}
+
+	// 6. Worker stale-reaper loop — only when workers.enabled=true.
+	//    Reclaims slots held by vanished remote daemons on a cadence so the
+	//    registry never shows a dead worker as live. Inert (skipped) by default.
+	if (deps.config.workers.enabled) {
+		try {
+			workerReaper = startWorkerReaper({
+				registry: workerRegistry,
+				leaseSeconds: deps.config.workers.leaseSeconds,
+				intervalMs: WORKER_REAPER_INTERVAL_MS,
+				now: () => Date.now(),
+			});
+		} catch {
+			// Fail-closed: worker reaper failure is isolated.
+		}
+	}
+
 	return {
 		stop(): void {
 			// Guard each — a loop that never started (null) is a no-op.
@@ -157,6 +227,16 @@ export function startV2Loops(deps: V2BootDeps): { stop(): void } {
 			}
 			try {
 				digest?.stop();
+			} catch {
+				// ignore
+			}
+			try {
+				previewReaper?.stop();
+			} catch {
+				// ignore
+			}
+			try {
+				workerReaper?.stop();
 			} catch {
 				// ignore
 			}

@@ -161,6 +161,50 @@ describe("buildBwrapArgs", () => {
     expect(args.join(" ")).not.toContain("SSH_AUTH_SOCK");
   });
 
+  test("does NOT emit --uid when agentUid is unset (default unchanged)", () => {
+    const args = buildBwrapArgs(BASE_PROFILE);
+    expect(args).not.toContain("--uid");
+    expect(args).not.toContain("--gid");
+  });
+
+  test("emits --uid <agentUid> when agentUid is set", () => {
+    const p: SandboxProfile = { ...BASE_PROFILE, agentUid: 999 };
+    const args = buildBwrapArgs(p);
+    const idx = args.indexOf("--uid");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(args[idx + 1]).toBe("999");
+    // gid not set → no --gid
+    expect(args).not.toContain("--gid");
+  });
+
+  test("emits --gid <agentGid> when agentGid is set", () => {
+    const p: SandboxProfile = { ...BASE_PROFILE, agentUid: 999, agentGid: 998 };
+    const args = buildBwrapArgs(p);
+    const uidIdx = args.indexOf("--uid");
+    const gidIdx = args.indexOf("--gid");
+    expect(uidIdx).toBeGreaterThanOrEqual(0);
+    expect(args[uidIdx + 1]).toBe("999");
+    expect(gidIdx).toBeGreaterThanOrEqual(0);
+    expect(args[gidIdx + 1]).toBe("998");
+  });
+
+  test("agentGid alone emits --gid but not --uid", () => {
+    const p: SandboxProfile = { ...BASE_PROFILE, agentGid: 998 };
+    const args = buildBwrapArgs(p);
+    expect(args).not.toContain("--uid");
+    const gidIdx = args.indexOf("--gid");
+    expect(gidIdx).toBeGreaterThanOrEqual(0);
+    expect(args[gidIdx + 1]).toBe("998");
+  });
+
+  test("--uid/--gid appear inside the user namespace (after --unshare-user)", () => {
+    const p: SandboxProfile = { ...BASE_PROFILE, agentUid: 999, agentGid: 998 };
+    const args = buildBwrapArgs(p);
+    // bwrap --uid only takes effect within the unshared user namespace.
+    expect(args.indexOf("--unshare-user")).toBeLessThan(args.indexOf("--uid"));
+    expect(args.indexOf("--unshare-user")).toBeLessThan(args.indexOf("--gid"));
+  });
+
   test("custom roSystemDirs are used instead of defaults", () => {
     const p: SandboxProfile = {
       ...BASE_PROFILE,
@@ -188,6 +232,12 @@ describe("checkSandboxInvariants — clean profile", () => {
     const args = buildBwrapArgs(BASE_PROFILE);
     const violations = checkSandboxInvariants(args, BASE_PROFILE);
     expect(violations).toEqual([]);
+  });
+
+  test("returns [] when agentUid/agentGid are set and emitted", () => {
+    const p: SandboxProfile = { ...BASE_PROFILE, agentUid: 999, agentGid: 998 };
+    const args = buildBwrapArgs(p);
+    expect(checkSandboxInvariants(args, p)).toEqual([]);
   });
 });
 
@@ -236,6 +286,38 @@ describe("checkSandboxInvariants — planted violations", () => {
     const bad = [...args, "--bind", "/secret/config", "/secret/config"];
     const v = checkSandboxInvariants(bad, BASE_PROFILE);
     expect(v.some((x) => x.rule === "R4:undeclared-bind")).toBe(true);
+  });
+
+  test("R6: --uid present but profile sets no agentUid is flagged", () => {
+    const args = [...buildBwrapArgs(BASE_PROFILE), "--uid", "999"];
+    const v = checkSandboxInvariants(args, BASE_PROFILE);
+    expect(v.some((x) => x.rule === "R6:agent-id")).toBe(true);
+  });
+
+  test("R6: --uid absent but profile requires agentUid is flagged", () => {
+    const p: SandboxProfile = { ...BASE_PROFILE, agentUid: 999 };
+    // Strip the --uid flag (and its value) the builder emitted.
+    const built = buildBwrapArgs(p);
+    const uidIdx = built.indexOf("--uid");
+    const args = [...built.slice(0, uidIdx), ...built.slice(uidIdx + 2)];
+    const v = checkSandboxInvariants(args, p);
+    expect(v.some((x) => x.rule === "R6:agent-id")).toBe(true);
+  });
+
+  test("R6: --uid value mismatch is flagged", () => {
+    const p: SandboxProfile = { ...BASE_PROFILE, agentUid: 999 };
+    const built = buildBwrapArgs(p);
+    const uidIdx = built.indexOf("--uid");
+    const args = [...built];
+    args[uidIdx + 1] = "1000"; // tamper the uid
+    const v = checkSandboxInvariants(args, p);
+    expect(v.some((x) => x.rule === "R6:agent-id")).toBe(true);
+  });
+
+  test("R6: --gid present but profile sets no agentGid is flagged", () => {
+    const args = [...buildBwrapArgs(BASE_PROFILE), "--gid", "998"];
+    const v = checkSandboxInvariants(args, BASE_PROFILE);
+    expect(v.some((x) => x.rule === "R6:agent-id")).toBe(true);
   });
 
   test("multiple violations are all returned", () => {

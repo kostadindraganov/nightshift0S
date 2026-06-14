@@ -13,6 +13,9 @@
  *   R4  Every --bind / --ro-bind source must be a declared path (worktree,
  *       taskHome, providerAuthDir, system dirs, or a virtual mount)
  *   R5  --unshare-{user,pid,ipc,uts,cgroup} must all be present
+ *   R6  When the profile sets agentUid/agentGid, the argv must emit exactly
+ *       `--uid <agentUid>` / `--gid <agentGid>` (egress uid-scoping); when unset,
+ *       no --uid/--gid may appear (default behaviour unchanged).
  *
  * This file is pure — no I/O — and runs on macOS for CI purposes.
  */
@@ -82,6 +85,53 @@ function collectSetenvs(
 }
 
 /**
+ * Read the single value that follows `flag` in argv (e.g. `--uid` → next token).
+ * Returns undefined when the flag is absent.
+ */
+function readFlagValue(args: string[], flag: string): string | undefined {
+  const idx = args.indexOf(flag);
+  if (idx === -1) return undefined;
+  return args[idx + 1];
+}
+
+/**
+ * R6 helper: assert the presence/value of a `--uid` / `--gid` flag matches the
+ * profile's expected numeric id. expected === undefined ⇒ the flag must be
+ * ABSENT (default behaviour unchanged). expected set ⇒ the flag must be present
+ * with exactly `String(expected)`.
+ */
+function checkIdFlag(
+  args: string[],
+  flag: string,
+  expected: number | undefined,
+  violations: Violation[]
+): void {
+  const actual = readFlagValue(args, flag);
+  if (expected === undefined) {
+    if (actual !== undefined) {
+      violations.push({
+        rule: "R6:agent-id",
+        detail: `${flag} ${actual} is present but the profile sets no agent id for it`,
+      });
+    }
+    return;
+  }
+  if (actual === undefined) {
+    violations.push({
+      rule: "R6:agent-id",
+      detail: `${flag} is absent but the profile requires ${expected} (egress uid-scoping)`,
+    });
+    return;
+  }
+  if (actual !== String(expected)) {
+    violations.push({
+      rule: "R6:agent-id",
+      detail: `${flag} ${actual} does not match profile value ${expected}`,
+    });
+  }
+}
+
+/**
  * Returns true if `path` is under a forbidden root (/home or host homedir).
  */
 function isForbiddenPath(path: string): boolean {
@@ -119,6 +169,12 @@ export function checkSandboxInvariants(
       });
     }
   }
+
+  // R6 — agent uid/gid scoping must match the profile exactly.
+  // When set, the argv must carry `--uid <agentUid>` (resp. --gid); when unset,
+  // the argv must NOT carry --uid/--gid so default behaviour is unchanged.
+  checkIdFlag(args, "--uid", p.agentUid, violations);
+  checkIdFlag(args, "--gid", p.agentGid, violations);
 
   // R3 — no SSH_AUTH_SOCK in --setenv
   const setenvs = collectSetenvs(args);

@@ -166,6 +166,35 @@ function providerAuthDir(homePath: string, provider: string): string {
 }
 
 /**
+ * Resolve the dedicated agent uid/gid from the environment.
+ * NIGHTSHIFT_AGENT_UID / NIGHTSHIFT_AGENT_GID, parsed as non-negative integers.
+ * Unset / blank / non-numeric ⇒ undefined (no --uid/--gid emitted; behaviour is
+ * exactly as before). This is the single place the env is read for the coder and
+ * one-shot sandbox profiles so agents run under the uid the nftables egress rules
+ * (`meta skuid <uid>`) match. The sane fallback (e.g. 999) is supplied by the
+ * top-level entrypoint, NOT here — profile.ts and this builder stay pure-by-env.
+ */
+export function resolveAgentIds(env: NodeJS.ProcessEnv = process.env): {
+	agentUid?: number;
+	agentGid?: number;
+} {
+	const parse = (raw: string | undefined): number | undefined => {
+		if (raw === undefined) return undefined;
+		const trimmed = raw.trim();
+		if (trimmed === "") return undefined;
+		const n = Number(trimmed);
+		if (!Number.isInteger(n) || n < 0) return undefined;
+		return n;
+	};
+	const agentUid = parse(env.NIGHTSHIFT_AGENT_UID);
+	const agentGid = parse(env.NIGHTSHIFT_AGENT_GID);
+	return {
+		...(agentUid !== undefined ? { agentUid } : {}),
+		...(agentGid !== undefined ? { agentGid } : {}),
+	};
+}
+
+/**
  * Pure builder: the SandboxProfile for an interactive coder run — worktree rw,
  * per-task HOME rw, provider auth dir ro, and the agent's explicit env
  * allowlist (the same `env` buildAgentInvocation constructed — NEVER the host
@@ -191,6 +220,10 @@ export function buildCoderSandboxProfile(input: {
 	// step 3b) so authDest is a writable host directory that claude can also use
 	// for session data (history, hooks). A ro-bind overlay would block those writes
 	// and stall claude on its first run in a fresh task home.
+	// Run the interactive coder under the dedicated agent uid/gid (when set in
+	// env) so nftables `meta skuid <uid>` egress rules actually filter its
+	// packets. Unset ⇒ undefined ⇒ no --uid/--gid ⇒ behaviour unchanged.
+	const { agentUid, agentGid } = resolveAgentIds();
 	return {
 		worktreePath: input.worktreePath,
 		taskHome: input.homePath,
@@ -198,6 +231,8 @@ export function buildCoderSandboxProfile(input: {
 		repoGitDir: input.repoDir ? join(input.repoDir, ".git") : undefined,
 		envAllowlist: input.envAllowlist,
 		roSystemDirs: ["/usr", "/bin", "/lib", "/lib64", ...extraSysDir],
+		...(agentUid !== undefined ? { agentUid } : {}),
+		...(agentGid !== undefined ? { agentGid } : {}),
 	};
 }
 

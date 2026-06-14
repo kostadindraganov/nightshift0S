@@ -21,7 +21,7 @@ import { runMigrations } from "../db/migrate.ts";
 import { projects, runs, tasks } from "../db/schema.ts";
 import { EventLog } from "../events/events.ts";
 import { FakeLauncher } from "./launcher.ts";
-import { buildAgentInvocation, spawnRun } from "./spawn.ts";
+import { buildAgentInvocation, spawnRun, buildCoderSandboxProfile, resolveAgentIds } from "./spawn.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -352,4 +352,72 @@ describe("spawnRun", () => {
 		},
 		{ timeout: 15_000 },
 	);
+});
+
+describe("resolveAgentIds", () => {
+	test("returns {} when env is empty", () => {
+		expect(resolveAgentIds({})).toEqual({});
+	});
+
+	test("parses NIGHTSHIFT_AGENT_UID / NIGHTSHIFT_AGENT_GID", () => {
+		expect(resolveAgentIds({ NIGHTSHIFT_AGENT_UID: "999", NIGHTSHIFT_AGENT_GID: "998" })).toEqual({
+			agentUid: 999,
+			agentGid: 998,
+		});
+	});
+
+	test("uid alone yields only agentUid", () => {
+		expect(resolveAgentIds({ NIGHTSHIFT_AGENT_UID: "999" })).toEqual({ agentUid: 999 });
+	});
+
+	test("blank / non-numeric / negative values are ignored (fail to unset)", () => {
+		expect(resolveAgentIds({ NIGHTSHIFT_AGENT_UID: "" })).toEqual({});
+		expect(resolveAgentIds({ NIGHTSHIFT_AGENT_UID: "  " })).toEqual({});
+		expect(resolveAgentIds({ NIGHTSHIFT_AGENT_UID: "abc" })).toEqual({});
+		expect(resolveAgentIds({ NIGHTSHIFT_AGENT_UID: "-5" })).toEqual({});
+		expect(resolveAgentIds({ NIGHTSHIFT_AGENT_UID: "9.5" })).toEqual({});
+	});
+});
+
+describe("buildCoderSandboxProfile — agent uid threading", () => {
+	const baseInput = {
+		worktreePath: "/opt/nightshift/worktrees/task-7",
+		homePath: "/opt/nightshift/homes/7",
+		provider: "claude-code",
+		envAllowlist: { PATH: "/usr/bin" },
+	};
+
+	test("omits agentUid/agentGid when env unset (default unchanged)", () => {
+		const prevU = process.env.NIGHTSHIFT_AGENT_UID;
+		const prevG = process.env.NIGHTSHIFT_AGENT_GID;
+		delete process.env.NIGHTSHIFT_AGENT_UID;
+		delete process.env.NIGHTSHIFT_AGENT_GID;
+		try {
+			const p = buildCoderSandboxProfile(baseInput);
+			expect(p.agentUid).toBeUndefined();
+			expect(p.agentGid).toBeUndefined();
+		} finally {
+			if (prevU === undefined) delete process.env.NIGHTSHIFT_AGENT_UID;
+			else process.env.NIGHTSHIFT_AGENT_UID = prevU;
+			if (prevG === undefined) delete process.env.NIGHTSHIFT_AGENT_GID;
+			else process.env.NIGHTSHIFT_AGENT_GID = prevG;
+		}
+	});
+
+	test("threads agentUid/agentGid from env", () => {
+		const prevU = process.env.NIGHTSHIFT_AGENT_UID;
+		const prevG = process.env.NIGHTSHIFT_AGENT_GID;
+		process.env.NIGHTSHIFT_AGENT_UID = "999";
+		process.env.NIGHTSHIFT_AGENT_GID = "998";
+		try {
+			const p = buildCoderSandboxProfile(baseInput);
+			expect(p.agentUid).toBe(999);
+			expect(p.agentGid).toBe(998);
+		} finally {
+			if (prevU === undefined) delete process.env.NIGHTSHIFT_AGENT_UID;
+			else process.env.NIGHTSHIFT_AGENT_UID = prevU;
+			if (prevG === undefined) delete process.env.NIGHTSHIFT_AGENT_GID;
+			else process.env.NIGHTSHIFT_AGENT_GID = prevG;
+		}
+	});
 });

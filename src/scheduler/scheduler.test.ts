@@ -279,3 +279,49 @@ test("review-WIP at the ceiling throttles the pass — nothing is claimed", asyn
 	expect(below.started).toEqual([t1, t2]);
 	expect(startedBelow).toEqual([t1, t2]);
 });
+
+// ---------------------------------------------------------------------------
+// (g) containerConfig propagation: resolveSpawn → tickOnce → startRun (TASK 3)
+//
+// Proves the container isolation policy a routing closure puts on the SpawnPlan
+// is carried, unchanged, into the startRun input — and that an absent policy
+// stays absent (default behaviour unchanged).
+// ---------------------------------------------------------------------------
+
+test("containerConfig on the plan is threaded into the startRun input; absent stays absent", async () => {
+	const t1 = seedReadyTask(1);
+	const t2 = seedReadyTask(2);
+
+	const enabledContainer = {
+		enabled: true,
+		runtime: "docker",
+		image: "nightshift:latest",
+		network: "none",
+		memLimit: "4g",
+		cpuLimit: "2",
+	} as const;
+
+	const received: Array<{ taskId: number; containerConfig: unknown }> = [];
+	const deps = makeDeps({
+		maxParallelSlots: 3,
+		// t1 carries an enabled container policy; t2 carries none.
+		resolveSpawn: async (task) =>
+			task.id === t1
+				? { ...plan(), containerConfig: enabledContainer }
+				: plan(),
+		startRun: async (input) => {
+			received.push({ taskId: input.taskId, containerConfig: input.containerConfig });
+			return { ok: true };
+		},
+	});
+
+	const report = await tickOnce(deps);
+	expect(report.started).toEqual([t1, t2]);
+
+	const forT1 = received.find((r) => r.taskId === t1);
+	const forT2 = received.find((r) => r.taskId === t2);
+	// t1's plan carried the enabled policy through to startRun unchanged.
+	expect(forT1?.containerConfig).toEqual(enabledContainer);
+	// t2 carried no policy → undefined reaches startRun (default path unchanged).
+	expect(forT2?.containerConfig).toBeUndefined();
+});

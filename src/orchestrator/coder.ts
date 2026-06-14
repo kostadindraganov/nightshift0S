@@ -21,6 +21,7 @@ import { transitionRun } from "../runs/transitions.ts";
 import { spawnRun } from "../runs/spawn.ts";
 import type { SpawnDeps } from "../runs/spawn.ts";
 import type { AuthLane, RunKind } from "../db/columns.ts";
+import type { NightshiftConfig } from "../config/config.ts";
 import { prepareAndOpenPR } from "../forge/forge.ts";
 import type { ForgeClient } from "../forge/github.ts";
 import type { Pusher } from "../forge/push.ts";
@@ -273,6 +274,12 @@ export interface StartCoderTaskInput {
 	/** Blueprint workflow-skill slugs mounted into the per-task HOME before launch. */
 	skillsMount?: string[];
 	/**
+	 * V3 container isolation policy (config.container), threaded through to
+	 * spawnRun → makeIsolatedSpawn. Absent or disabled (enabled=false) leaves the
+	 * default bwrap sandbox path unchanged.
+	 */
+	containerConfig?: NightshiftConfig["container"];
+	/**
 	 * True for any non-human-initiated spawn (scheduler/webhook). When true the
 	 * egress fail-closed gate is enforced before any run row or agent process is
 	 * created (LIVE-WIRING D5, THREAT-MODEL fail-closed requirement #2).
@@ -355,6 +362,7 @@ export async function startCoderTask(
 			repoDir: input.repoDir,
 			homeRoot: input.homeRoot,
 			skillsMount: input.skillsMount,
+			containerConfig: input.containerConfig,
 		});
 	} catch (err) {
 		// Log spawn failures so operators can diagnose them from journalctl.

@@ -23,6 +23,7 @@ import type { DbHandle } from "../db/client.ts";
 import type { EventLog } from "../events/events.ts";
 import type { TaskRow, RunRow } from "../db/schema.ts";
 import type { AuthLane, RunState } from "../db/columns.ts";
+import type { NightshiftConfig } from "../config/config.ts";
 import { RUN_TERMINAL_STATES } from "../db/columns.ts";
 import { runs, events, tasks } from "../db/schema.ts";
 import { listTasks } from "../tasks/tasks.ts";
@@ -48,6 +49,14 @@ export interface SpawnPlan {
 	homeRoot: string;
 	/** Blueprint workflow-skill slugs to mount (config.coder.skillsMount). */
 	skillsMount?: string[];
+	/**
+	 * V3 container isolation policy (config.container). When present it is
+	 * threaded through startCoderTask → spawnRun → makeIsolatedSpawn. When the
+	 * policy is disabled (enabled=false) the container path is a pure passthrough
+	 * to the existing bwrap sandbox; when absent, spawnRun uses the bwrap path
+	 * unchanged. Default behaviour is unchanged whether absent or disabled.
+	 */
+	containerConfig?: NightshiftConfig["container"];
 }
 
 export interface SchedulerDeps {

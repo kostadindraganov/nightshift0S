@@ -4,16 +4,20 @@
  *   (a) buildOneShotArgv: reviewer-runner argv built correctly per provider;
  *       unknown provider throws OneShotDisabledError (fail-closed).
  *   (b) buildOneShotEnv: NO GitHub token / NIGHTSHIFT_* / SSH_AUTH_SOCK in the
- *       agent one-shot env (HOST-SIDE TOKEN INVARIANT).
+ *       agent one-shot env (HOST-SIDE TOKEN INVARIANT). PATH includes provider
+ *       bin dir when NIGHTSHIFT_PROVIDER_BIN_DIR is set.
  *   (c) makeRunReviewer: with a FAKE spawner — prompt + cwd reach the spawner,
  *       a reviewer run row is recorded and reaches `succeeded`, headSha is
  *       re-resolved via the injected git runner, returns {stdout,runId,headSha}.
  *   (d) makeResumeCoder: with a FAKE launcher + :memory: DB — the resumed coder
  *       command contains `--resume '<sessionId>'` and a NEW coder run is created.
+ *   (e) [NEW] PATH includes NIGHTSHIFT_PROVIDER_BIN_DIR, auth dir is created +
+ *       seeded before spawner is called, and a non-zero exit surfaces stderr in
+ *       the thrown error message.
  */
 
 import { afterAll, beforeAll, beforeEach, afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -31,6 +35,7 @@ import {
 	makeResumeCoder,
 	OneShotDisabledError,
 	type OneShotSpawner,
+	type OneShotSpec,
 } from "./liveSpawn.ts";
 
 let handle: DbHandle;
@@ -202,10 +207,127 @@ test("makeResumeCoder resumes the coder session with --resume in the command", a
 	expect(row.kind).toBe("coder");
 
 	// The launcher received a command containing `--resume 'sess-abc'`.
+	// The command is bwrap-wrapped: ["bwrap", ...bwrapArgs, "--", "sh", "-c", <shellStr>].
+	// The shell one-liner with the prompt+resume flag is always the last element.
 	const session = launcher.sessions.get(`ns-${runId}`);
 	expect(session).toBeDefined();
-	const shellStr = session!.spec.command[2];
+	const shellStr = session!.spec.command.at(-1);
 	expect(shellStr).toContain("--resume 'sess-abc'");
 	// HOST-SIDE TOKEN INVARIANT: no GitHub token in the coder env either.
 	expect(session!.spec.env.GITHUB_TOKEN).toBeUndefined();
+});
+
+// ---------------------------------------------------------------------------
+// (e) NEW: provider bin dir in PATH, auth dir created+seeded, stderr in error
+
+test("buildOneShotEnv prepends NIGHTSHIFT_PROVIDER_BIN_DIR to PATH when set", () => {
+	const prev = process.env.NIGHTSHIFT_PROVIDER_BIN_DIR;
+	try {
+		process.env.NIGHTSHIFT_PROVIDER_BIN_DIR = "/opt/nightshift/bin";
+		const env = buildOneShotEnv("/home/task/99");
+		expect(env.PATH?.startsWith("/opt/nightshift/bin:")).toBe(true);
+		expect(env.PATH).toContain("/usr/local/bin");
+	} finally {
+		if (prev === undefined) delete process.env.NIGHTSHIFT_PROVIDER_BIN_DIR;
+		else process.env.NIGHTSHIFT_PROVIDER_BIN_DIR = prev;
+	}
+});
+
+test("buildOneShotEnv PATH has no empty segment when NIGHTSHIFT_PROVIDER_BIN_DIR is unset", () => {
+	const prev = process.env.NIGHTSHIFT_PROVIDER_BIN_DIR;
+	try {
+		delete process.env.NIGHTSHIFT_PROVIDER_BIN_DIR;
+		const env = buildOneShotEnv("/home/task/99");
+		// PATH must not start with ':' (which would put '' = CWD first — a security issue)
+		expect(env.PATH?.startsWith(":")).toBe(false);
+		expect(env.PATH).toContain("/usr/local/bin");
+	} finally {
+		if (prev !== undefined) process.env.NIGHTSHIFT_PROVIDER_BIN_DIR = prev;
+	}
+});
+
+test("makeRunReviewer creates auth dir and passes repoGitDir to spawner before spawn", async () => {
+	const homeRoot = join(tmp, "homes-e");
+	const wtPath = join(tmp, "wt-e");
+	mkdirSync(wtPath, { recursive: true });
+	seedCoderRun({ worktreePath: wtPath });
+
+	const seenSpecs: OneShotSpec[] = [];
+	const fakeSpawner: OneShotSpawner = async (spec) => {
+		seenSpecs.push(spec);
+		return { stdout: '{"verdict":"approved"}', exitCode: 0 };
+	};
+	const fakeGit = async (args: string[]) => (args[0] === "rev-parse" ? "abcdef\n" : "");
+
+	const repoDir = join(tmp, "repo-e");
+	mkdirSync(repoDir, { recursive: true });
+
+	const runReviewer = makeRunReviewer({
+		handle,
+		log,
+		spawner: fakeSpawner,
+		git: fakeGit,
+		reviewerProvider: "claude-code",
+		homeRoot,
+		repoDir,
+	});
+
+	await runReviewer({ task, round: 1, prompt: "check it", attempt: 0 });
+
+	expect(seenSpecs).toHaveLength(1);
+	const spec = seenSpecs[0]!;
+
+	// Auth dir must exist before spawner was called (claude-code → .claude).
+	const expectedAuthDir = join(homeRoot, String(task.id), ".claude");
+	expect(existsSync(expectedAuthDir)).toBe(true);
+
+	// spawner receives the correct authDir path.
+	expect(spec.providerAuthDir).toBe(expectedAuthDir);
+
+	// repoGitDir is the .git dir under the injected repoDir.
+	expect(spec.repoGitDir).toBe(join(repoDir, ".git"));
+});
+
+test("makeRunReviewer non-zero exit surfaces stderr in thrown error", async () => {
+	const homeRoot = join(tmp, "homes-f");
+	const wtPath = join(tmp, "wt-f");
+	mkdirSync(wtPath, { recursive: true });
+	seedCoderRun({ worktreePath: wtPath });
+
+	// Fake spawner that simulates a non-zero exit with a stderr message.
+	// We simulate this by having the spawner throw the same error the real
+	// spawnOneShotCaptured would throw (the error type is OneShotDisabledError).
+	const fakeSpawner: OneShotSpawner = async (_spec) => {
+		throw new OneShotDisabledError(
+			"one-shot exited non-zero (1)\nstderr: claude: command not found",
+		);
+	};
+	const fakeGit = async () => "unused\n";
+
+	const runReviewer = makeRunReviewer({
+		handle,
+		log,
+		spawner: fakeSpawner,
+		git: fakeGit,
+		reviewerProvider: "codex",
+		homeRoot,
+	});
+
+	let caughtErr: Error | undefined;
+	try {
+		await runReviewer({ task, round: 1, prompt: "check it", attempt: 0 });
+	} catch (err) {
+		caughtErr = err as Error;
+	}
+
+	expect(caughtErr).toBeDefined();
+	// The error message must include both the exit code and the stderr text.
+	expect(caughtErr!.message).toContain("non-zero (1)");
+	expect(caughtErr!.message).toContain("claude: command not found");
+
+	// The run row must have transitioned to `failed` (fail-closed).
+	const allRuns = handle.db.select().from(runs).where(eq(runs.taskId, task.id)).all();
+	const reviewerRun = allRuns.find((r) => r.kind === "reviewer");
+	expect(reviewerRun).toBeDefined();
+	expect(reviewerRun!.state).toBe("failed");
 });
