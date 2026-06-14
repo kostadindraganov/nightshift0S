@@ -155,6 +155,13 @@ export const spawnOneShotCaptured: OneShotSpawner = async (spec) => {
 		// uid/gid (when set in env) so they are uid-scoped for nftables egress
 		// enforcement, exactly like the interactive coder. Unset ⇒ unchanged.
 		const { agentUid, agentGid } = resolveAgentIds();
+		// Mirror buildCoderSandboxProfile (spawn.ts): mount NIGHTSHIFT_PROVIDER_BIN_DIR
+		// so provider CLIs outside /home (e.g. /opt/nightshift/bin/claude) are visible
+		// inside the bwrap sandbox. Without this the argv[0] execvp fails even when
+		// the dir is in PATH.
+		const providerBinDir = process.env.NIGHTSHIFT_PROVIDER_BIN_DIR;
+		const extraSysDir =
+			providerBinDir && !providerBinDir.startsWith("/home") ? [providerBinDir] : [];
 		const profile: SandboxProfile = {
 			worktreePath: spec.cwd,
 			taskHome: spec.home,
@@ -164,6 +171,7 @@ export const spawnOneShotCaptured: OneShotSpawner = async (spec) => {
 			// a linked worktree (mirrors buildCoderSandboxProfile in spawn.ts).
 			repoGitDir: spec.repoGitDir,
 			envAllowlist: env,
+			roSystemDirs: ["/usr", "/bin", "/lib", "/lib64", ...extraSysDir],
 			...(agentUid !== undefined ? { agentUid } : {}),
 			...(agentGid !== undefined ? { agentGid } : {}),
 		};

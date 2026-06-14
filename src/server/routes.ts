@@ -241,16 +241,21 @@ const buildReviewDeps: ReviewRoutesConfig["buildDeps"] = (ctx): ReviewDeps => {
 				log: ctx.events,
 				reviewerProvider: cfg.providers.defaultReviewer,
 				tournamentChallengerProvider: cfg.tournament.challengerProvider,
+				homeRoot: cfg.sandbox.homeRoot,
+				...(repoDir ? { repoDir } : {}),
 			  })
 			: makeRunReviewer({
 				handle: ctx.handle,
 				log: ctx.events,
 				reviewerProvider: cfg.providers.defaultReviewer,
+				homeRoot: cfg.sandbox.homeRoot,
+				...(repoDir ? { repoDir } : {}),
 			  }),
 		resumeCoder: makeResumeCoder({
 			handle: ctx.handle,
 			log: ctx.events,
 			launcher: new TmuxLauncher(),
+			homeRoot: cfg.sandbox.homeRoot,
 			...(repoDir ? { repoDir } : {}),
 		}),
 		maxRounds: cfg.review.maxRounds,
