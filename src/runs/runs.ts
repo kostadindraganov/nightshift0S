@@ -111,7 +111,7 @@ export type ClaimResult =
 export async function claimTaskAndCreateRun(
 	handle: DbHandle,
 	log: EventLog,
-	input: CreateRunInput,
+	input: CreateRunInput & { baseSha?: string },
 ): Promise<ClaimResult> {
 	// Step 1: create the run first so we have a run.id.
 	const run = await createRun(handle, input);
@@ -122,7 +122,10 @@ export async function claimTaskAndCreateRun(
 		to: "coding",
 		expectedFrom: "ready",
 		actor: `run:${run.id}`,
-		extra: { claimedBy: run.id },
+		extra: {
+			claimedBy: run.id,
+			...(input.baseSha ? { baseSha: input.baseSha } : {}),
+		},
 	});
 
 	if (!claimResult.ok) {

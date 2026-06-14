@@ -45,6 +45,8 @@ import { startCliUpdateCadence } from "../providers/cliUpdateCadence.ts";
 import { cliUpdater } from "../providers/cliUpdate.ts";
 import { makeEvidenceResolveSpawn } from "../orchestrator/evidenceRouting.ts";
 import type { RepoConfig } from "../orchestrator/coder.ts";
+import { reconcileOrphansAtBoot } from "../runs/reap.ts";
+import { TmuxLauncher } from "../runs/launcher.ts";
 
 export const DEFAULT_PORT = 3000;
 
@@ -164,6 +166,11 @@ if (import.meta.main) {
 		dev: true,
 		onReady: ({ handle, events }) => {
 			const config = loadConfig();
+
+			// Boot safety net: reconcile any runs whose tmux sessions died across a restart.
+			void reconcileOrphansAtBoot({ handle, log: events, launcher: new TmuxLauncher() })
+				.then((n) => { if (n > 0) console.log(`boot_reconcile: ${n} orphaned run(s) → interrupted`); })
+				.catch((err) => console.error("boot_reconcile failed:", err instanceof Error ? err.message : err));
 
 			// Boot safety net: promote any backlog task whose deps are all merged to ready.
 			void recomputeReadiness(handle, events).catch((err) =>
@@ -362,7 +369,12 @@ if (import.meta.main) {
 			const coderCompletion = startCoderCompletionTrigger({
 				handle,
 				log: events,
-				resolveRepo: (task) => resolveRepoConfig(task),
+				resolveRepo: (task, run) => ({
+					...resolveRepoConfig(task),
+					// Use the run's actual worktree path so completeCoderRun reads
+					// and pushes from the agent's worktree, not the main checkout.
+					worktreePath: run.worktreePath ?? resolveRepoConfig(task).repoDir,
+				}),
 			});
 				shutdownTasks.push(() => coderCompletion.stop());
 

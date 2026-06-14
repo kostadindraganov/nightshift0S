@@ -14,7 +14,10 @@
 #
 # Required:
 #   NIGHTSHIFT_EGRESS_UID   uid whose outbound packets are filtered (the
-#                           unprivileged service user, NOT root). Required.
+#                           unprivileged service user, NOT root). This should be
+#                           the nightshift-agent system user (uid 999).
+#                           Set via: export NIGHTSHIFT_EGRESS_UID=999
+#                           Required.
 # Optional:
 #   NIGHTSHIFT_EGRESS_HOSTS space-separated extra hosts on top of the default
 #                           provider+GitHub allowlist (api.anthropic.com,

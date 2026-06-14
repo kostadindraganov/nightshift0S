@@ -24,6 +24,7 @@ import { triggerRoutes } from "../triggers/triggerRoutes.ts";
 import { webhookRoutes } from "../triggers/webhookRoutes.ts";
 import { chatRoutes } from "../triggers/chatRoutes.ts";
 import { experimentRoutes } from "../experiment/experimentRoutes.ts";
+import { promptOptimizeRoutes } from "../experiment/promptOptimizeRoutes.ts";
 import { memoryRoutes } from "../memory/memoryRoutes.ts";
 import { analyticsRoutes } from "../analytics/analyticsRoutes.ts";
 import { agentsMdRoutes } from "../maintenance/agentsMdRoutes.ts";
@@ -715,6 +716,8 @@ export const routes: Route[] = [
 	...transcriptRoutes,
 	// -- experiment ledger timeline (Phase 6, §3.11) ---------------------------
 	...experimentRoutes,
+	// -- prompt self-optimization (Phase 7 V3, §3.11) -------------------------
+	...promptOptimizeRoutes,
 	// -- provider auth health panel (5.8, §3.9) --------------------------------
 	...authHealthRoutes,
 	// -- routines + manual/cron triggers w/ authz (5.8, §3.2/§3.12.6) ----------

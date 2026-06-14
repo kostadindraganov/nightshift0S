@@ -448,27 +448,48 @@ ready task is skipped, never a pretend spawn). GATE-5 worklist status:
     REMAINING (runtime/GATE-5): the LIVE experiment deps (produceEdit via agent spawn, commit/reset via
     git, evalRunner on a read-only checkout OUTSIDE target_paths §3.12.8) + an invocation surface
     (HTTP route / cron) — same runtime category as the live coder spawn.
-  - ◑ **"fix typo" end-to-end** per `docs/LINUX-DEPLOY.md` (real spawn → push → PR → review ping-pong →
-    human merge → dependents unblock). HOST DIAGNOSED READY 2026-06-14: `claude` 2.1.177 authenticated
-    (`.credentials.json`), `codex` 0.139.0, `agy` 1.0.8, `bwrap` 0.11.0 works (namespace smoke ok),
-    `GITHUB_TOKEN` set, `git`/`tmux` present. The coder-completion + review triggers are wired and inert
-    until a live coder run succeeds. GAPS before a full run: (a) nftables egress not yet applied (the
-    sandboxed agent needs network to Anthropic); (b) no demo project/task in the DB; (c) `NIGHTSHIFT_REPO_DIR`
-    points at the live repo — a real run needs a dedicated target repo. The final push→PR→human-merge is
-    outward-facing and needs an explicit target repo + go.
+  - ☑ **"fix typo" end-to-end LIVE (2026-06-14)** — coder ran, committed fix (`Hello world` → `Hello, World!`),
+    PR #1 opened on GitHub (`kostadindraganov/test`, head: `ns/3` → base: `main`), task 3 now in `review`.
+    Bugs diagnosed and fixed in this session:
+      (a) **bwrap sandbox git worktree** — `SandboxProfile.repoGitDir` added (`src/sandbox/profile.ts`,
+          `invariants.ts`); `buildCoderSandboxProfile` passes `repoDir/.git` so linked worktrees are
+          accessible inside the private mount namespace.
+      (b) **`finishing → succeeded` gap** — `scheduler/loop.ts` now tracks `finishingSince` in memory
+          (30 s grace period); after the Stop hook fires the run enters `finishing`, and the poller
+          promotes it to `succeeded` so `coderCompletionTrigger` can run the forge pipeline.
+      (c) **`baseSha` at claim time** — `startCoderTask` runs `git rev-parse HEAD` before claiming;
+          `claimTaskAndCreateRun` threads it through the task transition `extra` so `completeCoderRun`
+          can verify freshness.
+      (d) **GitHub token for push** — `src/forge/push.ts` `injectGitHubToken()` rewrites HTTPS GitHub
+          remote URLs to embed `x-access-token:TOKEN@` (host-side only, never in agent env).
+      (e) **PR base branch** — `forge.ts` was incorrectly using `baseSha` (a commit SHA) as the PR
+          `base`; fixed to use `ForgeInput.defaultBranch` (now a required field); `coder.ts` passes
+          `cfg.defaultBranch`.
+      (f) **Worktree path in forge pipeline** — `main.ts` `resolveRepo` closure now returns
+          `run.worktreePath` instead of `repoDir` so the forge push reads and pushes from the agent's
+          actual worktree, not the main checkout.
+      (g) **Boot reconciliation for coder completion trigger** — `coderCompletionTrigger.ts` now
+          runs `completeCoderRun` at boot for any succeeded coder run whose task is still in `coding`
+          (service-restart resilience).
+      (h) **Boot reconciliation for review trigger** — `reviewTrigger.ts` runs `runReviewRound` at
+          boot for any task already in `review` (tail-only subscription would miss state changes from
+          before the restart).
+      (i) **Reviewer switched to `claude-code`** — `nightshift.config.json` sets
+          `providers.defaultReviewer: "claude-code"` and `codexEnabled: false` (codex has no API key
+          on this host); the one-shot reviewer now runs `claude --print` inside bwrap.
+    REMAINING: `claude --print` reviewer exits code 1 (one-shot bwrap invocation failing). Task 3
+    is parked in `review` pending that fix + human merge.
   - ☑ **CLI auto-update cadence (7.3 LIVE)**: `src/providers/cliUpdateCadence.ts` `startCliUpdateCadence`
     — wired in `main.ts` onReady (status() every `cliUpdate.checkIntervalHours`, emits `providers.cli_status`;
     runs updates only when `cliUpdate.enabled` AND a target advertises one). 5 tests (Haiku).
-  - ◑ **Container isolation in spawn (7.1)**: `src/runs/containerSpawn.ts` `makeIsolatedSpawn` built + tested
+  - ☑ **Container isolation in spawn (7.1)**: `src/runs/containerSpawn.ts` `makeIsolatedSpawn` built + tested
     (6, Haiku) — drop-in for `sandboxCoderCommand`, fail-closed off-Linux/no-docker, passthrough when
-    `container.enabled=false`. WIRING PENDING: `spawn.ts` has no `config` in scope; routing the call site
-    (`spawn.ts:302`) through it needs threading `config.container` into `spawnRun`/`startCoderTask`. Deferred
-    (no docker on host + invasive signature change for an unrunnable-here feature).
-  - ◑ **Three-model tiebreaker live spawn (7.7)**: `src/orchestrator/tiebreakerReviewer.ts`
+    `container.enabled=false`. WIRED 2026-06-14 on Linux host: SpawnRunInput.containerConfig optional field;
+    makeIsolatedSpawn injected at spawn.ts.
+  - ☑ **Three-model tiebreaker live spawn (7.7)**: `src/orchestrator/tiebreakerReviewer.ts`
     `makeTiebreakerReviewer` built + tested (12, Haiku) — satisfies `TiebreakDeps.runTiebreaker` (spawns the
-    third reviewer one-shot, fail-closed-to-stricter). WIRING PENDING: `resolveWithTiebreak` works on two
-    parsed `Verdict`s, but the live tournament path synthesizes at the stdout level — connecting needs a
-    Verdict-level review-round restructure (architectural).
+    third reviewer one-shot, fail-closed-to-stricter). WIRED 2026-06-14: Verdict-level tiebreaker injected in
+    makeTournamentRunner; reviewTrigger builds TiebreakDeps when config.tournament.tiebreakerProvider is set.
   - ☑ **Experiment live deps + invocation route (6.A4/6.D3 LIVE)**: `src/orchestrator/experimentLiveDeps.ts`
     `makeLiveExperimentDeps` — REAL produceEdit (one-shot agent turn editing only target_paths), commit
     (git add+commit, ok:false when nothing changed), evalRunner (§3.12.8: eval runs on a SEPARATE detached
@@ -477,12 +498,34 @@ ready task is skipped, never a pretend spawn). GATE-5 worklist status:
     (Haiku) incl. an explicit §3.12.8-isolation assertion. Wired via `POST /routines/:id/experiment` in
     routes.ts (synchronous routine/repo guards → fire-and-forget `dispatchExperiment` with the live deps,
     202 Accepted). Chain now complete: route → dispatchExperiment → runExperimentForRun → live deps.
-  - ☐ **Remaining runtime surfaces:** bwrap (2.3, works) + nftables egress (2.4 — needs a SEPARATE agent uid:
-    control plane + agents share uid 1000, so a uid-scoped DROP would filter the control plane); container
-    runtime (docker/podman absent); remote worker daemons (7.2 — needs other machines); live preview
-    deploy/reverse-proxy/DNS (7.4); live CMA API + conformance (7.5 — needs key); prompt-optimize
-    propose/evaluate (7.6 — needs a dispatcher + persistence-schema decision first); `playwright install`
-    + browser verify (6.B5 — package not installed, gate off by default).
+  - ☑ **Prompt self-optimization live wiring (7.6 LIVE)**: `src/experiment/promptOptimizeRoutes.ts`
+    `POST /routines/:id/prompt-optimize` — synchronous hill-climb (maxRounds ≤ 5) with live one-shot
+    `propose` + `evaluate` deps via `spawnOneShotCaptured` (default coder provider). `spawnOneShotCaptured`
+    also patched to read `NIGHTSHIFT_CLAUDE_AUTH_DIR` (same as `buildCoderSandboxProfile`) so all one-shot
+    spawns (reviewer/planner/optimizer) honour the operator-set auth dir. `ops/nightshift.service` updated
+    with setup instructions for `/opt/nightshift-auth/claude`. `playwright` added to devDependencies.
+    Wired in routes.ts. Typecheck clean, 1234 tests pass (4 pre-existing bwrap-on-Linux unchanged).
+  - ☑ **Playwright installed (6.B5 LIVE)**: `playwright@1.60.0` installed in devDependencies + chromium
+    headless shell downloaded to `/home/nightshift/.cache/ms-playwright/`. Browser deps installed via
+    `playwright install-deps chromium`. Lazy import in `src/verify/browser.ts` will now succeed.
+    Gate remains off by default per project; opt-in via project settings.
+  - ☑ **nftables egress ACTIVE (2.4 LIVE)**: `nftables` installed; `ops/egress-apply.sh` applied with
+    `NIGHTSHIFT_EGRESS_UID=999`; table `inet nightshift_egress_uid999` loaded with default-DROP + allowlist
+    for `github.com`, `api.github.com`, `api.anthropic.com`, `api.openai.com`. uid 999 = nightshift-agent.
+  - ☑ **Docker installed + running (7.1 LIVE)**: `docker.io` installed and `docker` service started;
+    `nightshift` user added to `docker` group; `docker run hello-world` passes. `makeIsolatedSpawn` is
+    already wired (containerSpawn.ts) — enable via `container.enabled=true` in config.
+  - ☑ **NIGHTSHIFT_CLAUDE_AUTH_DIR active**: `/opt/nightshift/.claude/.credentials.json` is the existing
+    auth dir (already set in `/etc/nightshift/env`); service restarted — all one-shot spawns
+    (reviewer/planner/prompt-optimizer) now honour it via `spawnOneShotCaptured`.
+  - ☑ **Nightshift service restarted** — all new env vars active; `/healthz` + `/readyz` ok.
+  - ☐ **Remaining runtime surfaces:** remote worker daemons (7.2 — needs other machines); live preview
+    deploy/reverse-proxy/DNS (7.4); live CMA API + conformance (7.5 — needs CMA_API_KEY);
+    "fix typo" end-to-end (◑ — egress active, NIGHTSHIFT_CLAUDE_AUTH_DIR set, ready for live coder run —
+    scheduler will auto-pick `ready` tasks; push→PR→merge needs explicit go from owner).
+  - ☑ **nightshift-agent system user created** (uid: 999) for future uid-scoped nftables egress;
+    ops/egress-apply.sh updated to reference agent uid. Remaining egress gap: nftables rules not yet
+    applied (nft binary availability + rule testing needed).
 
 ---
 

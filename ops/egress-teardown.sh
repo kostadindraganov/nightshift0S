@@ -13,7 +13,9 @@
 # LINUX-VERIFY-ONLY: exercised live by the owner; CI checks syntax only.
 #
 # Required:
-#   NIGHTSHIFT_EGRESS_UID   uid whose egress table is removed.
+#   NIGHTSHIFT_EGRESS_UID   uid whose egress table is removed. This should be
+#                           the nightshift-agent system user (uid 999).
+#                           Set via: export NIGHTSHIFT_EGRESS_UID=999
 set -euo pipefail
 
 UID_ARG="${NIGHTSHIFT_EGRESS_UID:?set NIGHTSHIFT_EGRESS_UID=<service-user-uid>}"

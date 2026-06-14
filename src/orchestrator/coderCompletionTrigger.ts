@@ -11,11 +11,11 @@
  * run gets a fresh attempt.
  */
 
-import { sql } from "drizzle-orm";
+import { sql, eq, and } from "drizzle-orm";
 import type { DbHandle } from "../db/client.ts";
 import type { EventLog } from "../events/events.ts";
 import type { TaskRow, RunRow } from "../db/schema.ts";
-import { events } from "../db/schema.ts";
+import { events, runs, tasks } from "../db/schema.ts";
 import { getRun } from "../runs/runs.ts";
 import { RUN_STATE_CHANGED } from "../runs/transitions.ts";
 import {
@@ -91,6 +91,43 @@ export function startCoderCompletionTrigger(
 			.select({ max: sql<number>`coalesce(max(${events.seq}), 0)` })
 			.from(events)
 			.get()?.max ?? 0;
+
+	// Boot reconciliation: find succeeded coder runs whose tasks are still in
+	// `coding` (completeCoderRun never fired, e.g. service restarted mid-pipeline).
+	// Run them now, after the subscription is set so new events aren't missed.
+	void (async () => {
+		const pending = handle.db
+			.select({ run: runs })
+			.from(runs)
+			.innerJoin(tasks, eq(tasks.id, runs.taskId))
+			.where(and(eq(runs.state, "succeeded"), eq(runs.kind, "coder"), eq(tasks.state, "coding")))
+			.all()
+			.map((r) => r.run);
+		for (const run of pending) {
+			if (stopped) break;
+			if (run.taskId === null) continue;
+			const { getTask } = await import("../tasks/tasks.ts");
+			const task = getTask(handle, run.taskId);
+			if (task === null) continue;
+			let cfg: RepoConfig;
+			try {
+				cfg = resolveRepo(task, run);
+			} catch {
+				continue;
+			}
+			let coderDeps: CoderOrchestratorDeps;
+			try {
+				coderDeps = await buildDepsFactory({ handle, log, resolveRepo, owner: cfg.owner, repo: cfg.repo });
+			} catch {
+				continue;
+			}
+			try {
+				await completeCoderRun(coderDeps, run.id);
+			} catch (err) {
+				console.warn(`[coderCompletionTrigger] boot_reconcile run ${run.id}: ${err instanceof Error ? err.message : err}`);
+			}
+		}
+	})();
 
 	const subscription = log.subscribe({
 		afterSeq: startSeq,

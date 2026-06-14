@@ -250,6 +250,7 @@ describe("prepareAndOpenPR", () => {
     branch: "ns/test-feature-abc123",
     owner: "owner",
     repo: "repo",
+    defaultBranch: "main",
     title: "Test PR",
     body: "Test body",
   };
@@ -313,6 +314,7 @@ describe("prepareAndOpenPR", () => {
     expect(cState.lastReq?.path).toBe("/repos/owner/repo/pulls");
     const body = cState.lastReq?.body as Record<string, unknown>;
     expect(body["head"]).toBe("ns/test-feature-abc123");
+    expect(body["base"]).toBe("main");
     expect(body["title"]).toBe("Test PR");
   });
 

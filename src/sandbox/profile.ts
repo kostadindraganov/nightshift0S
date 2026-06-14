@@ -25,6 +25,19 @@ export interface SandboxProfile {
   /** Absolute path to the provider auth dir (credentials, tokens) — ro. */
   providerAuthDir: string;
   /**
+   * Optional: host-side source for the auth dir. When set, the bwrap bind is
+   * `--ro-bind hostAuthSource providerAuthDir`, allowing creds outside /home to
+   * be mounted at the right in-sandbox path without violating R2:home-leak.
+   */
+  hostAuthSource?: string;
+  /**
+   * Optional: absolute path to the main repo's .git directory. Required for git
+   * operations to work inside the sandbox when the worktree is a linked worktree
+   * (i.e. worktree/.git is a file pointing back to repoRoot/.git/worktrees/<id>).
+   * Without this bind git cannot resolve the gitdir pointer and all git commands fail.
+   */
+  repoGitDir?: string;
+  /**
    * Env vars that should be visible inside the sandbox.
    * SSH_AUTH_SOCK must NOT appear here — the caller is responsible for
    * scrubbing it before building the profile, but buildBwrapArgs also
@@ -39,6 +52,13 @@ export interface SandboxProfile {
 }
 
 const DEFAULT_RO_SYSTEM_DIRS = ["/usr", "/bin", "/lib", "/lib64"] as const;
+
+/** Files/dirs needed for DNS resolution and TLS inside the sandbox. */
+const NETWORK_RO_BINDS = [
+  "/etc/resolv.conf",
+  "/etc/ssl",
+  "/etc/nsswitch.conf",
+] as const;
 
 /**
  * Build the full bwrap argv from a `SandboxProfile`.
@@ -84,15 +104,44 @@ export function buildBwrapArgs(p: SandboxProfile): string[] {
     args.push("--ro-bind", d, d);
   }
 
+  // ── DNS + TLS (needed for API calls, e.g. api.anthropic.com) ─────────────
+  for (const f of NETWORK_RO_BINDS) {
+    args.push("--ro-bind", f, f);
+  }
+
   // ── worktree — read-write ─────────────────────────────────────────────────
   args.push("--bind", p.worktreePath, p.worktreePath);
+
+  // ── main repo .git dir — read-write ──────────────────────────────────────
+  // Linked worktrees have a .git FILE (not dir) pointing to repoRoot/.git/worktrees/<id>.
+  // Without this bind, git inside the sandbox cannot resolve the gitdir pointer
+  // and every git command fails. Rw so git can write COMMIT_EDITMSG, update-index, etc.
+  if (p.repoGitDir) {
+    args.push("--bind", p.repoGitDir, p.repoGitDir);
+  }
 
   // ── per-task agent HOME — read-write ──────────────────────────────────────
   args.push("--bind", p.taskHome, p.taskHome);
   args.push("--setenv", "HOME", p.taskHome);
 
-  // ── provider auth dir — read-only ────────────────────────────────────────
-  args.push("--ro-bind", p.providerAuthDir, p.providerAuthDir);
+  // ── provider auth dir ────────────────────────────────────────────────────
+  // Three cases:
+  //  A) External source (hostAuthSource set, different path): ro-bind the
+  //     external dir at providerAuthDir inside the sandbox.
+  //  B) providerAuthDir is NOT under taskHome: ro-bind it at itself so the
+  //     path is accessible inside the sandbox (otherwise bwrap won't see it).
+  //  C) providerAuthDir IS under taskHome: the rw taskHome bind above already
+  //     covers it — adding --ro-bind here would make it read-only and block
+  //     claude session writes (e.g. history, settings, session-env).
+  const underTaskHome =
+    p.providerAuthDir.startsWith(p.taskHome + "/") ||
+    p.providerAuthDir === p.taskHome;
+  if (p.hostAuthSource && p.hostAuthSource !== p.providerAuthDir) {
+    args.push("--ro-bind", p.hostAuthSource, p.providerAuthDir); // case A
+  } else if (!underTaskHome) {
+    args.push("--ro-bind", p.providerAuthDir, p.providerAuthDir); // case B
+  }
+  // case C: no extra bind — rw taskHome access is sufficient
 
   // ── env allowlist ─────────────────────────────────────────────────────────
   // Defence-in-depth: skip SSH_AUTH_SOCK even if caller put it in allowlist.

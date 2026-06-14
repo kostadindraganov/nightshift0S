@@ -12,8 +12,8 @@
  * time and safe under the test suite's createServer boot.
  */
 
-import { sql } from "drizzle-orm";
-import { events } from "../db/schema.ts";
+import { sql, eq } from "drizzle-orm";
+import { events, tasks } from "../db/schema.ts";
 import type { DbHandle } from "../db/client.ts";
 import type { EventLog } from "../events/events.ts";
 import type { NightshiftConfig } from "../config/config.ts";
@@ -77,9 +77,20 @@ function defaultBuildReviewDeps(deps: ReviewTriggerDeps): ReviewDeps {
 		deps.reviewerProvider ?? config.providers.defaultReviewer;
 	const tournamentChallengerProvider =
 		deps.tournamentChallengerProvider ?? config.tournament.challengerProvider;
+	// §7.7 three-model tiebreaker provider. Empty string in config ⇒ no tiebreaker
+	// (config default is ""): makeTournamentReviewer builds the third-model seam
+	// only when this is non-empty, otherwise tournament stays fail-closed/stricter.
+	const tiebreakerProvider = config.tournament.tiebreakerProvider;
 	const homeRoot = config.sandbox.homeRoot;
 
-	const liveDepsBase = { handle, log, homeRoot, reviewerProvider, tournamentChallengerProvider };
+	const liveDepsBase = {
+		handle,
+		log,
+		homeRoot,
+		reviewerProvider,
+		tournamentChallengerProvider,
+		tiebreakerProvider,
+	};
 
 	const runReviewer = config.tournament.enabled
 		? makeTournamentReviewer(liveDepsBase)
@@ -149,6 +160,30 @@ export function startReviewTrigger(deps: ReviewTriggerDeps): ReviewTriggerHandle
 		afterSeq: startSeq,
 		filter: (e) => e.kind === "task.state_changed",
 	});
+
+	// Boot reconciliation: fire review rounds for tasks already in `review`
+	// (trigger was tail-only — these tasks' state_changed events were before startSeq).
+	void (async () => {
+		const pending = handle.db.select().from(tasks).where(eq(tasks.state, "review")).all();
+		for (const task of pending) {
+			if (stopped) break;
+			try {
+				const reviewDeps = buildDeps(deps);
+				const useHarness = deps.config.review.specialistHarness;
+				if (useHarness) {
+					const makeFinder = deps.makeProduceFinder ?? defaultMakeProduceFinder(deps);
+					await runHarnessReviewRound({ ...reviewDeps, makeProduceFinder: makeFinder }, task.id);
+				} else {
+					await runReviewRound(reviewDeps, task.id);
+				}
+			} catch (err) {
+				console.warn("[reviewTrigger] boot_reconcile threw", {
+					taskId: task.id,
+					err: err instanceof Error ? err.message : String(err),
+				});
+			}
+		}
+	})();
 
 	void (async () => {
 		for await (const event of subscription) {

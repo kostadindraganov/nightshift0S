@@ -126,11 +126,24 @@ export function makeTermWebsocket(handle: DbHandle): Bun.WebSocketHandler<TermSo
 			}
 
 			// 3) Tail the log file incrementally: send only newly-appended bytes.
+			// Ensure the log file exists before watching (run may not have written yet).
+			try {
+				const f = Bun.file(logFile);
+				if (!(await f.exists())) await Bun.write(logFile, "");
+			} catch { /* non-fatal — watch will fail gracefully below */ }
 			const startOffset = await fileSize(logFile);
-			const state: TailState = {
-				watcher: watch(logFile, { persistent: false }, () => {
+			let watcher: ReturnType<typeof watch>;
+			try {
+				watcher = watch(logFile, { persistent: false }, () => {
 					void drainTail(ws, tails);
-				}),
+				});
+			} catch {
+				// Log file not watchable yet (e.g. ENOENT race) — close cleanly.
+				ws.close();
+				return;
+			}
+			const state: TailState = {
+				watcher,
 				offset: startOffset,
 				reading: false,
 			};

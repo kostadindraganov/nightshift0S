@@ -22,6 +22,11 @@
 import type { ReviewDeps, ReviewerRunResult } from "../orchestrator/review.ts";
 import type { VerdictFinding, Verdict } from "./verdict.ts";
 import { codeReviewJudge } from "./judge.ts";
+import {
+	verdictsDisagree,
+	resolveWithTiebreak,
+	type TiebreakDeps,
+} from "./tiebreaker.ts";
 
 // ---------------------------------------------------------------------------
 // Deduplication key
@@ -150,6 +155,7 @@ export function serializeTournamentOutput(t: TournamentResult): string {
 export function makeTournamentRunner(
 	primaryRunner: ReviewDeps["runReviewer"],
 	challengerRunner: ReviewDeps["runReviewer"],
+	tiebreakerDeps?: TiebreakDeps,
 ): ReviewDeps["runReviewer"] {
 	return async (input): Promise<ReviewerRunResult> => {
 		const [primarySettled, challengerSettled] = await Promise.allSettled([
@@ -184,6 +190,41 @@ export function makeTournamentRunner(
 		}
 		if (!primaryParsed.ok) return challengerResult;
 		if (!challengerParsed.ok) return primaryResult;
+
+		// THREE-MODEL TIEBREAKER (§7.7): when a tiebreaker seam is injected AND the
+		// two reviewers disagree on the binary approve/block decision, consult the
+		// third model as the deciding vote. resolveWithTiebreak is FAIL-CLOSED: if
+		// no runTiebreaker is present (or it throws) it falls to `stricter` (block
+		// wins). On AGREE it never runs (we synthesize below as before).
+		if (
+			tiebreakerDeps &&
+			verdictsDisagree(primaryParsed.verdict, challengerParsed.verdict)
+		) {
+			const resolved = await resolveWithTiebreak(
+				primaryParsed.verdict,
+				challengerParsed.verdict,
+				tiebreakerDeps,
+				{
+					prTitle: `[ns#${input.task.id}] ${input.task.title}`,
+					prBody: input.task.description ?? "",
+					diff: input.prompt,
+					round: input.round,
+				},
+			);
+			const tbStdout = serializeTournamentOutput({
+				verdict: resolved.verdict,
+				findings: resolved.findings,
+				summary: `[tiebreaker] ${resolved.summary}`,
+				stricterProvider: "tiebreaker",
+				primary: primaryResult,
+				challenger: challengerResult,
+			});
+			return {
+				...primaryResult,
+				stdout: tbStdout,
+				provider: `tournament(${primaryResult.provider}+${challengerResult.provider}+tiebreaker)`,
+			};
+		}
 
 		// Both parsed — synthesize
 		const t = synthesize(

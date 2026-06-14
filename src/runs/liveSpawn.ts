@@ -37,6 +37,8 @@ import { spawnSandboxed } from "../sandbox/spawn.ts";
 import type { SandboxProfile } from "../sandbox/profile.ts";
 import type { ReviewDeps, ReviewerRunResult } from "../orchestrator/review.ts";
 import { makeTournamentRunner } from "../review/tournament.ts";
+import type { TiebreakDeps } from "../review/tiebreaker.ts";
+import { makeTiebreakerReviewer } from "../orchestrator/tiebreakerReviewer.ts";
 
 // ---------------------------------------------------------------------------
 // One-shot runtime (LIVE-WIRING D1)
@@ -127,10 +129,16 @@ export const spawnOneShotCaptured: OneShotSpawner = async (spec) => {
 
 	let proc: import("bun").Subprocess;
 	if (process.platform === "linux") {
+		// Mirror buildCoderSandboxProfile: honour NIGHTSHIFT_CLAUDE_AUTH_DIR so
+		// the one-shot reviewer/planner path can find credentials outside /home.
+		const hostAuthEnv = process.env.NIGHTSHIFT_CLAUDE_AUTH_DIR;
+		const hostAuthSource =
+			hostAuthEnv && !hostAuthEnv.startsWith("/home") ? hostAuthEnv : undefined;
 		const profile: SandboxProfile = {
 			worktreePath: spec.cwd,
 			taskHome: spec.home,
 			providerAuthDir: spec.providerAuthDir,
+			hostAuthSource,
 			envAllowlist: env,
 		};
 		proc = await spawnSandboxed(profile, spec.argv);
@@ -203,6 +211,13 @@ export interface LiveDeps {
 	reviewerProvider?: string;
 	/** When set, tournament mode runs this second provider in parallel and synthesizes results. */
 	tournamentChallengerProvider?: string;
+	/**
+	 * Three-model tiebreaker provider (§7.7). When set (non-empty), tournament mode
+	 * consults this THIRD model as the deciding vote whenever the primary and
+	 * challenger disagree on the binary approve/block verdict. Empty/undefined ⇒ no
+	 * tiebreaker (fail-closed: stricter/block wins on disagreement, as before).
+	 */
+	tiebreakerProvider?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +457,21 @@ export function makeTournamentReviewer(deps: LiveDeps): ReviewDeps["runReviewer"
 		...deps,
 		reviewerProvider: deps.tournamentChallengerProvider,
 	});
-	return makeTournamentRunner(primaryRunner, challengerRunner);
+
+	// §7.7 three-model tiebreaker: build the third-model seam only when a
+	// non-empty tiebreakerProvider is configured. makeTiebreakerReviewer validates
+	// the provider eagerly (throws OneShotDisabledError on unknown) so wiring
+	// errors surface at startup, not at first tie.
+	const tiebreakerDeps: TiebreakDeps | undefined = deps.tiebreakerProvider
+		? {
+				runTiebreaker: makeTiebreakerReviewer({
+					tiebreakerProvider: deps.tiebreakerProvider,
+					...(deps.homeRoot !== undefined ? { homeRoot: deps.homeRoot } : {}),
+				}),
+			}
+		: undefined;
+
+	return makeTournamentRunner(primaryRunner, challengerRunner, tiebreakerDeps);
 }
 
 // ---------------------------------------------------------------------------

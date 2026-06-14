@@ -1,0 +1,9 @@
+{
+  "sandbox": {
+    "unattendedUntrustedRepos": true
+  },
+  "providers": {
+    "defaultReviewer": "claude-code",
+    "codexEnabled": false
+  }
+}

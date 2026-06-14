@@ -14,7 +14,7 @@
  *   5. Transition queued→starting, recording tmuxSession/worktreePath/homePath.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { DbHandle } from "../db/client.ts";
 import type { EventLog } from "../events/events.ts";
@@ -26,6 +26,8 @@ import type { Launcher, LaunchHandle } from "./launcher.ts";
 import { buildBwrapArgs, type SandboxProfile } from "../sandbox/profile.ts";
 import { checkSandboxInvariants } from "../sandbox/invariants.ts";
 import { bwrapAvailable, SandboxDisabledError } from "../sandbox/spawn.ts";
+import { makeIsolatedSpawn } from "./containerSpawn.ts";
+import type { NightshiftConfig } from "../config/config.ts";
 
 // ---------------------------------------------------------------------------
 // buildAgentInvocation
@@ -94,8 +96,15 @@ export function buildAgentInvocation(input: BuildAgentInvocationInput): AgentInv
 			? `--resume '${resumeSessionId.replace(/'/g, "'\\''")}' `
 			: "";
 
+	// Provider-specific extra flags: claude gets --dangerously-skip-permissions
+	// so it doesn't halt for each file/shell operation inside the bwrap sandbox
+	// (the operator already approved autonomous operation by enabling nightshift).
+	const extraFlags = (provider === "claude-code" || provider === "claudeCode")
+		? "--dangerously-skip-permissions "
+		: "";
+
 	// Shell one-liner: read the file into $p, delete it, exec the CLI with $p.
-	const shellOneLiner = `p=$(cat '${promptFile}'); rm -f '${promptFile}'; exec ${cli} ${resumeFlag}"$p"`;
+	const shellOneLiner = `p=$(cat '${promptFile}'); rm -f '${promptFile}'; exec ${cli} ${extraFlags}${resumeFlag}"$p"`;
 
 	const command = ["sh", "-c", shellOneLiner];
 
@@ -106,14 +115,27 @@ export function buildAgentInvocation(input: BuildAgentInvocationInput): AgentInv
 		NIGHTSHIFT_RUN_ID: String(runId),
 		// Working directory for the agent (the worktree).
 		NIGHTSHIFT_WORKTREE: worktreePath,
-		// Minimal PATH — enough for the provider CLI.
-		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+		// Minimal PATH — enough for the provider CLI. Prepend NIGHTSHIFT_PROVIDER_BIN_DIR
+		// so CLIs installed outside /home (e.g. /opt/nightshift/bin) are found first.
+		PATH: [
+			process.env.NIGHTSHIFT_PROVIDER_BIN_DIR,
+			"/usr/local/bin",
+			"/usr/bin",
+			"/bin",
+		].filter(Boolean).join(":"),
 		// Locale normalisation — avoid locale-dependent CLI output.
 		LC_ALL: "C",
 		LANG: "en_US.UTF-8",
+		// Signal to the provider CLI that it runs inside an automated sandbox.
+		IS_SANDBOX: "1",
 	};
 
-	if (bearer !== undefined) env.NIGHTSHIFT_API_TOKEN = bearer;
+	// Inject hook-bridge credentials into the sandbox env so hook.sh can POST
+	// lifecycle events back to the server. Fall back to the service process env
+	// when the caller doesn't explicitly pass these values.
+	const resolvedToken = bearer ?? process.env.NIGHTSHIFT_API_TOKEN;
+	if (resolvedToken) env.NIGHTSHIFT_API_TOKEN = resolvedToken;
+
 	if (apiBaseUrl !== undefined) {
 		// Extract the port from the base URL so the hook bridge can use it.
 		try {
@@ -122,6 +144,9 @@ export function buildAgentInvocation(input: BuildAgentInvocationInput): AgentInv
 		} catch {
 			// Ignore malformed URLs; the hook bridge will use its default port.
 		}
+	} else {
+		// Fall back to the service's configured port.
+		env.NIGHTSHIFT_PORT = process.env.NIGHTSHIFT_PORT ?? "3000";
 	}
 
 	return { command, env };
@@ -151,13 +176,51 @@ export function buildCoderSandboxProfile(input: {
 	homePath: string;
 	provider: string;
 	envAllowlist: Record<string, string>;
+	/** Optional: path to the main git repo root. Used to bind .git/ so linked
+	 *  worktrees (whose .git is a file pointer) can resolve git operations. */
+	repoDir?: string;
 }): SandboxProfile {
+	const authDest = providerAuthDir(input.homePath, input.provider);
+	// NIGHTSHIFT_PROVIDER_BIN_DIR: extra read-only dir mounted in the sandbox so
+	// provider CLIs installed outside /home (e.g. /opt/nightshift/bin/claude) are
+	// accessible without violating R2:home-leak.
+	const providerBinDir = process.env.NIGHTSHIFT_PROVIDER_BIN_DIR;
+	const extraSysDir =
+		providerBinDir && !providerBinDir.startsWith("/home") ? [providerBinDir] : [];
+	// WHY no hostAuthSource: we pre-copy credentials into authDest (see spawnRun
+	// step 3b) so authDest is a writable host directory that claude can also use
+	// for session data (history, hooks). A ro-bind overlay would block those writes
+	// and stall claude on its first run in a fresh task home.
 	return {
 		worktreePath: input.worktreePath,
 		taskHome: input.homePath,
-		providerAuthDir: providerAuthDir(input.homePath, input.provider),
+		providerAuthDir: authDest,
+		repoGitDir: input.repoDir ? join(input.repoDir, ".git") : undefined,
 		envAllowlist: input.envAllowlist,
+		roSystemDirs: ["/usr", "/bin", "/lib", "/lib64", ...extraSysDir],
 	};
+}
+
+/**
+ * Copy provider credentials from NIGHTSHIFT_CLAUDE_AUTH_DIR into the
+ * per-task providerAuthDir so claude can find them in the sandbox (taskHome
+ * is mounted rw; we do NOT ro-bind the auth source to avoid blocking session
+ * writes). Silently skips when the source dir is missing or not set.
+ */
+export function seedProviderCredentials(providerAuthDirPath: string): void {
+	const src = process.env.NIGHTSHIFT_CLAUDE_AUTH_DIR;
+	if (!src || src.startsWith("/home")) return;
+	for (const fname of [".credentials.json", "settings.json"]) {
+		const srcFile = join(src, fname);
+		const dstFile = join(providerAuthDirPath, fname);
+		if (existsSync(srcFile) && !existsSync(dstFile)) {
+			try {
+				copyFileSync(srcFile, dstFile);
+			} catch {
+				// ignore — missing file or permission error; claude will re-auth
+			}
+		}
+	}
 }
 
 /**
@@ -243,6 +306,12 @@ export interface SpawnRunInput {
 	 * to the prompt. Omit/empty = no skills mounted (backward compatible).
 	 */
 	skillsMount?: string[];
+	/**
+	 * When provided, use container isolation (via makeIsolatedSpawn) instead of
+	 * the default bwrap-only path. When absent the existing sandboxCoderCommand
+	 * call is used unchanged (backward compatible).
+	 */
+	containerConfig?: NightshiftConfig["container"];
 }
 
 /**
@@ -258,7 +327,7 @@ export interface SpawnRunInput {
  */
 export async function spawnRun(deps: SpawnDeps, input: SpawnRunInput): Promise<RunRow> {
 	const { handle, log, launcher } = deps;
-	const { taskId, runId, provider, prompt, repoDir, homeRoot, slug, apiBaseUrl, bearer, resumeSessionId, skillsMount } =
+	const { taskId, runId, provider, prompt, repoDir, homeRoot, slug, apiBaseUrl, bearer, resumeSessionId, skillsMount, containerConfig } =
 		input;
 
 	// Step 1: create (or reuse) the git worktree for this task.
@@ -296,10 +365,19 @@ export async function spawnRun(deps: SpawnDeps, input: SpawnRunInput): Promise<R
 		homePath,
 		provider,
 		envAllowlist: invocation.env,
+		repoDir,
 	});
-	// Ensure the provider auth dir exists so the bwrap --ro-bind source resolves.
+	// Ensure the provider auth dir exists and seed credentials from the auth
+	// source (NIGHTSHIFT_CLAUDE_AUTH_DIR). taskHome is mounted rw so claude
+	// can write session data there; no ro-bind overlay is used.
 	mkdirSync(profile.providerAuthDir, { recursive: true });
-	const launchCommand = await sandboxCoderCommand(invocation.command, profile);
+	seedProviderCredentials(profile.providerAuthDir);
+	const launchCommand = containerConfig !== undefined
+		? await makeIsolatedSpawn({
+				containerConfig,
+				deps: { bwrapFallback: sandboxCoderCommand },
+		  })(invocation.command, profile)
+		: await sandboxCoderCommand(invocation.command, profile);
 
 	// Step 4: launch via the injected Launcher.
 	const sessionName = `ns-${runId}`;

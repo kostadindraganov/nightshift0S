@@ -18,6 +18,7 @@ import type { EventLog } from "../events/events.ts";
 import { RUN_TERMINAL_STATES, type RunState } from "../db/columns.ts";
 import { runs } from "../db/schema.ts";
 import { transitionRun, isTerminalRunState } from "./transitions.ts";
+import { transitionTask } from "../tasks/transitions.ts";
 import type { Launcher, LaunchHandle } from "./launcher.ts";
 
 // ---------------------------------------------------------------------------
@@ -120,6 +121,17 @@ export async function reconcileOrphansAtBoot(deps: ReapDeps): Promise<number> {
 
 		if (result.ok) {
 			reconciled += 1;
+			// If the run was associated with a task that is still in `coding`,
+			// transition the task coding→failed so the triage/backlog requeue path
+			// can re-attempt it. A lost race (task already moved) is tolerated.
+			if (run.taskId != null) {
+				await transitionTask(handle, log, {
+					taskId: run.taskId,
+					to: "failed",
+					expectedFrom: "coding",
+					actor: "boot_reconcile",
+				}).catch(() => undefined);
+			}
 		}
 		// If the transition lost a race (very unlikely at boot), skip silently.
 	}

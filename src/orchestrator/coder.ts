@@ -175,6 +175,7 @@ export async function completeCoderRun(
 			remoteUrl: cfg.remoteUrl,
 			owner: cfg.owner,
 			repo: cfg.repo,
+			defaultBranch: cfg.defaultBranch,
 			diff,
 			title: `[ns#${task.id}] ${task.title}`,
 			body: `Automated PR for task ${task.id}.`,
@@ -314,6 +315,15 @@ export async function startCoderTask(
 		trustedRepo: input.trustedRepo ?? false,
 	});
 
+	// Compute baseSha — the HEAD of the main repo at claim time. The orchestrator
+	// uses this to diff the worktree and verify freshness after the run completes.
+	let baseSha: string | undefined;
+	try {
+		baseSha = (await execGit(["rev-parse", "HEAD"], input.repoDir)).trim();
+	} catch {
+		// Non-fatal: the orchestrator will parkTask if baseSha is missing.
+	}
+
 	// Claim the task and create the run.
 	const claim = await claimTaskAndCreateRun(handle, log, {
 		taskId: input.taskId,
@@ -321,6 +331,7 @@ export async function startCoderTask(
 		provider: input.provider,
 		model: input.model,
 		authLane: input.authLane,
+		baseSha,
 	});
 
 	if (!claim.ok) {
@@ -346,6 +357,8 @@ export async function startCoderTask(
 			skillsMount: input.skillsMount,
 		});
 	} catch (err) {
+		// Log spawn failures so operators can diagnose them from journalctl.
+		console.error(`[spawn_rollback] run ${claim.run.id} task ${input.taskId}:`, err instanceof Error ? err.message : String(err));
 		// (1) Run → killed from ANY active state (no expectedFrom: spawnRun may
 		// have advanced it queued→starting before failing the post-launch race).
 		await transitionRun(handle, log, {

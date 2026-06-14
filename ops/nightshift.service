@@ -33,6 +33,14 @@ Environment=HOME=/home/nightshift
 Environment=NIGHTSHIFT_DB_PATH=/opt/nightshift/data/nightshift.db
 Environment=NIGHTSHIFT_HOST=127.0.0.1
 Environment=NIGHTSHIFT_PORT=3000
+# NIGHTSHIFT_CLAUDE_AUTH_DIR: host path to claude auth dir, mounted ro inside
+# every bwrap sandbox (interactive coder + one-shot reviewer/planner/optimizer).
+# Must NOT be under /home (sandbox R2 home-leak guard). Recommended setup:
+#   sudo mkdir -p /opt/nightshift-auth/claude
+#   sudo cp /home/nightshift/.claude/.credentials.json /opt/nightshift-auth/claude/
+#   sudo chown -R nightshift:nightshift /opt/nightshift-auth
+# Then set:
+Environment=NIGHTSHIFT_CLAUDE_AUTH_DIR=/opt/nightshift-auth/claude
 
 # ── secrets (gitignored; created by deploy.sh) ───────────────────────────────
 # Required keys:

@@ -97,6 +97,28 @@ export function defaultPusher(
 }
 
 // ---------------------------------------------------------------------------
+// Token injection
+// ---------------------------------------------------------------------------
+
+/**
+ * Rewrite an HTTPS remote URL to embed the GITHUB_TOKEN for authentication.
+ * The token never appears in the push args (a URL is not logged as a flag);
+ * git replaces the credential with "***" in error output, but the token is
+ * still sensitive — the forge is the ONLY caller and runs on the control plane.
+ *
+ * Returns the original URL unchanged if GITHUB_TOKEN is not set or the URL
+ * is not an HTTPS GitHub URL (e.g. SSH remotes do not need this).
+ */
+export function injectGitHubToken(remoteUrl: string): string {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) return remoteUrl;
+  // Match https://github.com/... or https://www.github.com/...
+  const m = remoteUrl.match(/^(https?:\/\/)((?:www\.)?github\.com\/.+)$/);
+  if (!m) return remoteUrl;
+  return `${m[1]}x-access-token:${token}@${m[2]}`;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -110,7 +132,8 @@ export async function pushValidated(
   pusher: Pusher = defaultPusher,
   { worktreePath, remoteUrl, branch }: PushValidatedInput,
 ): Promise<string> {
-  const args = buildPushArgs({ remoteUrl, branch });
+  const authenticatedUrl = injectGitHubToken(remoteUrl);
+  const args = buildPushArgs({ remoteUrl: authenticatedUrl, branch });
   const env = pushEnv();
   return pusher(args, worktreePath, env);
 }

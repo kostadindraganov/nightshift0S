@@ -43,7 +43,7 @@ import { fileFollowUps } from "../orchestrator/followUps.ts";
 import { getTask } from "../tasks/tasks.ts";
 import { reapRun, type ReapDeps } from "../runs/reap.ts";
 import { evaluateRun, type WatchdogDeps } from "../runs/watchdog.ts";
-import { getRun } from "../runs/runs.ts";
+import { getRun, finishRun } from "../runs/runs.ts";
 import { RUN_TERMINAL_STATES, type RunState } from "../db/columns.ts";
 import { runs } from "../db/schema.ts";
 import { and, eq, notInArray } from "drizzle-orm";
@@ -230,13 +230,44 @@ export async function startSchedulerLoop(
 		readTranscriptTail: input.readTranscriptTail,
 		idleMs: config.timeouts.watchdogSeconds * 1000,
 	};
+	// finishing→succeeded: track when each run entered `finishing` so we can
+	// promote after a grace period. Claude Code's Stop hook fires when it finishes
+	// its task, but the tmux session stays alive (Claude sits in REPL mode).
+	// After FINISHING_GRACE_MS we can safely treat it as a clean exit.
+	const FINISHING_GRACE_MS = 30_000;
+	const finishingSince = new Map<number, number>(); // runId → epoch ms
 	const poller = setInterval(() => {
 		void (async () => {
+			const tickNow = Date.now();
 			// Budget first: a killed (terminal) run is then skipped by the watchdog.
 			await budgetEnforcer.sweep();
 			for (const run of activeRunningRuns(handle)) {
 				const { lastActivityMs, completionSignalAtMs } = input.runActivity(run);
 				await evaluateRun(watchdogDeps, run, lastActivityMs, completionSignalAtMs);
+			}
+			// finishing→succeeded: Stop hook already fired (run is in `finishing`).
+			// Promote to succeeded after FINISHING_GRACE_MS so the coderCompletionTrigger
+			// can run the forge/CI/push pipeline. Uses in-memory tracker so the grace
+			// period survives across scheduler ticks without a DB schema change.
+			for (const run of finishingRuns(handle)) {
+				if (!finishingSince.has(run.id)) {
+					finishingSince.set(run.id, tickNow);
+					continue;
+				}
+				const elapsed = tickNow - finishingSince.get(run.id)!;
+				if (elapsed >= FINISHING_GRACE_MS) {
+					finishingSince.delete(run.id);
+					await finishRun(handle, log, {
+						runId: run.id,
+						outcome: "succeeded",
+						exitReason: `stop_hook_grace:${elapsed}ms`,
+					});
+				}
+			}
+			// Prune stale entries for runs no longer in finishing state.
+			for (const [runId] of finishingSince) {
+				const run = getRun(handle, runId);
+				if (!run || run.state !== "finishing") finishingSince.delete(runId);
 			}
 		})();
 	}, config.concurrency.schedulerIntervalSeconds * 1000);
@@ -260,5 +291,14 @@ function activeRunningRuns(handle: DbHandle): RunRow[] {
 				notInArray(runs.state, [...RUN_TERMINAL_STATES] as RunState[]),
 			),
 		)
+		.all();
+}
+
+/** Runs in `finishing` state — these need tmux-exit detection to move to succeeded. */
+function finishingRuns(handle: DbHandle): RunRow[] {
+	return handle.db
+		.select()
+		.from(runs)
+		.where(eq(runs.state, "finishing" as RunState))
 		.all();
 }

@@ -150,7 +150,9 @@ describe("buildAgentInvocation", () => {
 			resumeSessionId: "sess-xyz",
 		});
 		expect(withResume.command[2]).toContain("--resume 'sess-xyz'");
-		expect(withResume.command[2]).toContain("exec claude --resume 'sess-xyz' \"$p\"");
+		expect(withResume.command[2]).toContain(
+			"exec claude --dangerously-skip-permissions --resume 'sess-xyz' \"$p\"",
+		);
 
 		const noResume = buildAgentInvocation({
 			provider: "claude-code",
@@ -298,11 +300,14 @@ describe("spawnRun", () => {
 			expect(session).toBeDefined();
 
 			const cmd = session!.spec.command;
-			// Should be ["sh", "-c", <one-liner>]
-			expect(cmd[0]).toBe("sh");
-			expect(cmd[1]).toBe("-c");
+			// On Linux with bwrap present the command is wrapped: ["bwrap", ..., "--", "sh", "-c", <one-liner>].
+			// On other platforms (NIGHTSHIFT_ALLOW_UNSANDBOXED_CODER=1) it is bare: ["sh", "-c", <one-liner>].
+			const separatorIdx = cmd.indexOf("--");
+			const innerCmd = separatorIdx >= 0 ? cmd.slice(separatorIdx + 1) : cmd;
+			expect(innerCmd[0]).toBe("sh");
+			expect(innerCmd[1]).toBe("-c");
 
-			const shellStr = cmd[2];
+			const shellStr = innerCmd[2];
 			expect(typeof shellStr).toBe("string");
 			expect(shellStr).toContain("cat");
 			expect(shellStr).toContain("rm");

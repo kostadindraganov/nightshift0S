@@ -136,7 +136,16 @@ export function checkSandboxInvariants(
     p.worktreePath,
     p.taskHome,
     p.providerAuthDir,
+    // hostAuthSource is the on-host source path when it differs from providerAuthDir
+    // (e.g. /opt/nightshift/.claude). It must NOT be under /home (R2 still applies).
+    ...(p.hostAuthSource ? [p.hostAuthSource] : []),
+    // repoGitDir: main repo .git dir needed for git worktree operations inside sandbox.
+    ...(p.repoGitDir ? [p.repoGitDir] : []),
     ...sysDirs,
+    // DNS + TLS files for network connectivity (api.anthropic.com etc.)
+    "/etc/resolv.conf",
+    "/etc/ssl",
+    "/etc/nsswitch.conf",
   ]);
 
   const binds = collectBinds(args);

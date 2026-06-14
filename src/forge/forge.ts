@@ -44,6 +44,7 @@ export interface ForgeInput {
   remoteUrl: string;
   owner: string;
   repo: string;
+  defaultBranch: string;
   diff: string;
   title: string;
   body: string;
@@ -114,7 +115,7 @@ export async function prepareAndOpenPR(
     owner: input.owner,
     repo: input.repo,
     head: input.branch,
-    base: input.baseSha,
+    base: input.defaultBranch,
     title: input.title,
     body: input.body,
   });
