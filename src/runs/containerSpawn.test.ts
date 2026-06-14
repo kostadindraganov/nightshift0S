@@ -148,9 +148,11 @@ test("when container enabled, platform is Linux, and runtime available, returns 
 	const innerCommand = ["python", "script.py"];
 	const result = await spawn(innerCommand, baseProfile);
 
-	// Result must start with ["run", "--rm", ...] (runtime prepended by tmux).
-	expect(result[0]).toBe("run");
-	expect(result[1]).toBe("--rm");
+	// command[0] MUST be the runtime binary (tmux joins the array into a shell
+	// string and execs command[0]), mirroring the bwrap path's command[0]="bwrap".
+	expect(result[0]).toBe("docker");
+	expect(result[1]).toBe("run");
+	expect(result[2]).toBe("--rm");
 
 	// Network, memory, CPU limits must be present.
 	expect(result).toContain("--network");

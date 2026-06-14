@@ -121,21 +121,25 @@ function buildInteractiveContainerArgv(
   cfg: ContainerConfig,
   spec: ContainerSpec,
 ): string[] {
-  // buildContainerArgv emits:
-  //   [runtime, "run", "--rm", --network, --memory, --cpus, -v..., -w, -e..., image, cmd...]
-  // We insert "-i" immediately before the image (which is always the second-to-last
-  // logical section before cmd).  The cleanest approach: build without the cmd,
-  // insert -i before the image, then append cmd.
+  // buildContainerArgv emits the runtime *sub*command and flags only — it does
+  // NOT prepend the runtime binary (the ContainerRunner path passes cfg.runtime
+  // separately to exec). The tmux path is different: TmuxLauncher joins the
+  // whole array into a shell string, so command[0] IS the executable. We must
+  // therefore prepend cfg.runtime ourselves, mirroring how the bwrap path's
+  // command[0] is "bwrap".
+  //   buildContainerArgv → ["run", "--rm", --network, --memory, --cpus, -v..., -w, -e..., image]
+  //   we return           → [<runtime>, "run", "--rm", ..., "-i", image, ...cmd]
+  // We insert "-i" immediately before the image (keep stdin open under tmux's PTY).
   const specWithoutCmd: ContainerSpec = { ...spec, cmd: [] };
   const base = buildContainerArgv(cfg, specWithoutCmd);
   // base ends with [image] (cmd is empty so nothing after image).
-  // Insert -i before the image token.
+  // Insert -i before the image token, and prepend the runtime binary.
   if (base.length === 0) {
     throw new Error("buildContainerArgv returned empty argv (unexpected)");
   }
   const image = base[base.length - 1] as string;
   const prefixWithoutImage = base.slice(0, base.length - 1);
-  return [...prefixWithoutImage, "-i", image, ...spec.cmd];
+  return [cfg.runtime, ...prefixWithoutImage, "-i", image, ...spec.cmd];
 }
 
 // ---------------------------------------------------------------------------

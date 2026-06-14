@@ -1000,13 +1000,16 @@ describe("startCoderTask container config threading", () => {
 		if (dockerAvailable) {
 			// Linux host with docker present → the container argv (buildContainerArgv
 			// via buildInteractiveContainerArgv) is built and handed to the launcher.
-			// That argv begins with the `run --rm` subcommand and carries the
-			// container flags + image from the threaded enabledContainer config —
-			// proving the config reached makeIsolatedSpawn and the container path was
-			// taken (vs. the bare bwrap `sh -c` one-liner the disabled test produced).
+			// That argv begins with the runtime binary followed by the `run --rm`
+			// subcommand and carries the container flags + image from the threaded
+			// enabledContainer config — proving the config reached makeIsolatedSpawn
+			// and the container path was taken (vs. the bare bwrap `sh -c` one-liner
+			// the disabled test produced). command[0] is the runtime binary because
+			// TmuxLauncher execs command[0] (mirrors the bwrap path's "bwrap").
 			expect(result.ok).toBe(true);
 			expect(cmd).not.toBeNull();
-			expect(cmd![0]).toBe("run");
+			expect(cmd![0]).toBe(enabledContainer.runtime);
+			expect(cmd![1]).toBe("run");
 			expect(cmd).toContain("--rm");
 			expect(cmd).toContain("--network");
 			expect(cmd).toContain(enabledContainer.network);
